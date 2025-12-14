@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Icon Generator</title>
+</head>
+<body>
+  <h1>dAIly Planner 아이콘 생성기</h1>
+  <p>아래 버튼을 클릭하면 아이콘 파일들이 자동으로 다운로드됩니다.</p>
+  <button id="generate-btn">아이콘 생성 및 다운로드</button>
+  <div id="preview" style="margin-top: 20px;"></div>
+
+  <script>
+    function generateIcon(size) {
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext('2d');
+
+      // 배경 그라데이션 (다크 블루)
+      const gradient = ctx.createLinearGradient(0, 0, size, size);
+      gradient.addColorStop(0, '#1a1a2e');
+      gradient.addColorStop(1, '#16213e');
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, size, size);
+
+      // 캘린더 그리기
+      const padding = size * 0.15;
+      const calendarWidth = size - padding * 2;
+      const calendarHeight = size - padding * 2;
+      const cornerRadius = Math.max(2, size * 0.08);
+
+      // 캘린더 배경 (반투명 흰색)
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+      roundRect(ctx, padding, padding, calendarWidth, calendarHeight, cornerRadius);
+      ctx.fill();
+
+      // 상단 바인더 (캘린더 상단 구멍 부분)
+      const binderHeight = size * 0.12;
+      ctx.fillStyle = 'rgba(100, 150, 255, 0.4)';
+      roundRect(ctx, padding, padding, calendarWidth, binderHeight, cornerRadius);
+      ctx.fill();
+
+      // 구멍들 (바인더에 있는 구멍)
+      const holeSize = Math.max(1, size * 0.025);
+      const holeSpacing = size * 0.08;
+      const startX = padding + holeSpacing;
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = 'rgba(18, 18, 20, 0.9)';
+        ctx.beginPath();
+        ctx.arc(startX + i * holeSpacing, padding + binderHeight / 2, holeSize, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // 날짜 숫자들
+      const gridPadding = size * 0.2;
+      const cellSize = (calendarWidth - gridPadding * 2) / 7;
+      const startY = padding + binderHeight + gridPadding;
+
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      const fontSize = Math.max(6, size * 0.1);
+      ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // 간단한 날짜 표시 (1, 2, 3)
+      const dateNumbers = size >= 48 ? [1, 2, 3] : [1, 2];
+      for (let i = 0; i < dateNumbers.length; i++) {
+        const x = padding + gridPadding + i * cellSize * 2 + cellSize;
+        const y = startY + cellSize / 2;
+        ctx.fillText(dateNumbers[i].toString(), x, y);
+      }
+
+      // 하단 강조선
+      if (size >= 16) {
+        ctx.strokeStyle = 'rgba(100, 150, 255, 0.6)';
+        ctx.lineWidth = Math.max(1, size * 0.015);
+        ctx.beginPath();
+        ctx.moveTo(padding + gridPadding, startY + cellSize * 1.2);
+        ctx.lineTo(padding + calendarWidth - gridPadding, startY + cellSize * 1.2);
+        ctx.stroke();
+      }
+
+      return canvas;
+    }
+
+    function roundRect(ctx, x, y, width, height, radius) {
+      ctx.beginPath();
+      ctx.moveTo(x + radius, y);
+      ctx.lineTo(x + width - radius, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+      ctx.lineTo(x + width, y + height - radius);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+      ctx.lineTo(x + radius, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+      ctx.lineTo(x, y + radius);
+      ctx.quadraticCurveTo(x, y, x + radius, y);
+      ctx.closePath();
+    }
+
+
+    function downloadCanvas(canvas, filename) {
+      canvas.toBlob((blob) => {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 'image/png');
+    }
+
+    document.getElementById('generate-btn').addEventListener('click', () => {
+      const sizes = [16, 48, 128];
+      const preview = document.getElementById('preview');
+      preview.innerHTML = '';
+
+      sizes.forEach((size, index) => {
+        const canvas = generateIcon(size);
+        downloadCanvas(canvas, `icon${size}.png`);
+        
+        // 미리보기
+        const img = document.createElement('img');
+        img.src = canvas.toDataURL('image/png');
+        img.style.width = '128px';
+        img.style.height = '128px';
+        img.style.margin = '10px';
+        img.style.border = '1px solid #ccc';
+        preview.appendChild(img);
+      });
+
+      alert('아이콘 파일들이 다운로드되었습니다! icons/ 폴더에 저장하세요.');
+    });
+  </script>
+</body>
+</html>
+
