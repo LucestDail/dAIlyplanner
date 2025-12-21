@@ -3,11 +3,24 @@
  * Handles AI-powered task analysis and scheduling
  */
 
+import { i18n } from './i18n.js';
+
 export class GeminiAPI {
-  constructor(apiKey, model = 'gemini-2.5-flash') {
+  constructor(apiKey, model = 'gemini-2.5-flash', language = 'ko') {
     this.apiKey = apiKey;
     this.model = model;
+    this.language = language;
     this.baseUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+  }
+
+  // Helper method to get translated text
+  t(key, params = {}) {
+    // Use i18n if available, otherwise fallback to direct access
+    if (typeof i18n !== 'undefined' && i18n.t) {
+      return i18n.t(key, params);
+    }
+    // Fallback: return key if i18n not available
+    return key;
   }
 
   async analyzeTask(taskData) {
@@ -107,6 +120,9 @@ export class GeminiAPI {
   }
 
   buildDailyTaskPrompt({ title, description, priority, duration, targetDate, userInfo, existingSchedules, clientLocalTime }) {
+    const lang = this.language || 'ko';
+    const locale = lang === 'ko' ? 'ko-KR' : 'en-US';
+    
     // 클라이언트 로컬 시간
     const now = clientLocalTime ? new Date(clientLocalTime) : new Date();
     const currentTimeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
@@ -119,68 +135,76 @@ export class GeminiAPI {
     const durationHours = (duration / 60).toFixed(1);
     
     // 기존 일정 포맷팅 (완료된 일정은 이미 필터링됨)
+    const hoursText = this.t('prompts.hours');
     const scheduleContext = existingSchedules && existingSchedules.length > 0
-      ? `\n**${targetDate} 기존 일정 (완료되지 않은 일정만, 시간 충돌 피해야 함):**
-${existingSchedules.map(s => `- ${s.time}: ${s.title} (${((s.duration || 60) / 60).toFixed(1)}시간, 우선순위: ${s.priority || 'medium'})`).join('\n')}`
-      : `\n**${targetDate} 기존 일정:** 없음 (자유롭게 시간을 배정할 수 있어요)`;
+      ? `\n${this.t('prompts.targetDateSchedules', { date: targetDate })}\n${existingSchedules.map(s => `- ${s.time}: ${s.title} (${((s.duration || 60) / 60).toFixed(1)}${hoursText}, ${this.t('prompts.priority')}: ${s.priority || 'medium'})`).join('\n')}`
+      : `\n${this.t('prompts.targetDateNoSchedules', { date: targetDate })}`;
 
     const tossStyleGuide = `
-**토스 스타일 라이팅 원칙:**
-- 해요체 사용: '~해요', '~있어요', '~드릴게요'
-- 간결하고 친근하게
+${this.t('prompts.tossStyleGuide')}
+${this.t('prompts.tossStyle1')}
+${this.t('prompts.tossStyle2')}
+${this.t('prompts.tossStyle3')}
+${this.t('prompts.tossStyle4')}
 `;
 
-    return `당신은 ${userInfo.name || '사용자'}님의 일간 일정 매니저예요. **${targetDate}** 하루의 일정을 관리해드려요.
+    const todayText = isToday ? (lang === 'ko' ? '(오늘)' : '(Today)') : '';
+    const workHoursText = lang === 'ko' ? '09:00 ~ 18:00 (8시간)' : '09:00 ~ 18:00 (8 hours)';
+    const timeSlotText = lang === 'ko' ? '오전/오후' : 'Morning/Afternoon';
+    const notEntered = this.t('prompts.notEntered');
+    const none = this.t('prompts.none');
+    const user = this.t('prompts.user');
+    const member = this.t('prompts.member');
+
+    return `${this.t('prompts.dailyManager', { name: userInfo.name || user, date: targetDate })}
 
 ${tossStyleGuide}
 
-**현재 시간 정보:**
-- 현재 시간: ${currentTimeStr}
-- 대상 날짜: ${targetDate} ${isToday ? '(오늘)' : ''}
-- 업무 가능 시간: 09:00 ~ 18:00 (8시간)
+**${lang === 'ko' ? '현재 시간 정보' : 'Current Time Information'}:**
+- ${lang === 'ko' ? '현재 시간' : 'Current Time'}: ${currentTimeStr}
+- ${lang === 'ko' ? '대상 날짜' : 'Target Date'}: ${targetDate} ${todayText}
+- ${lang === 'ko' ? '업무 가능 시간' : 'Available Work Hours'}: ${workHoursText}
 
-**사용자 정보:**
-- 이름: ${userInfo.name || '사용자'}님
-- 직업: ${userInfo.job || '미입력'}
-- 성향: ${userInfo.personality || '미입력'}
+**${this.t('prompts.userProfile', { name: userInfo.name || user, job: userInfo.job || notEntered, personality: userInfo.personality || notEntered })}**
 
-**새로운 업무:**
-- 제목: ${title}
-- 설명: ${description || '없음'}
-- 우선순위: ${priority}
-- 예상 소요 시간: ${durationHours}시간 (${duration}분)
+**${this.t('prompts.newTask')}:**
+- ${this.t('prompts.taskTitle')}: ${title}
+- ${this.t('prompts.taskDescription')}: ${description || none}
+- ${this.t('prompts.priority')}: ${priority}
+- ${this.t('prompts.estimatedDuration')}: ${durationHours}${hoursText} (${duration}${this.t('prompts.minutes')})
 ${scheduleContext}
 
-**중요 업무 규칙:**
-1. **날짜 고정**: 이 업무는 반드시 ${targetDate}에 배정해요
-2. 하루 최대 업무 시간은 8시간이에요
-3. 동일 업무는 하루 최대 4시간까지만 배정해요
-4. 4시간(240분) 초과 업무는 여러 시간대로 분할해요
-5. 기존 일정과 시간이 겹치지 않게 배정해요
-${isToday ? `6. 현재 시간(${currentTimeStr}) 이후의 시간대만 추천해요` : ''}
+**${lang === 'ko' ? '중요 업무 규칙' : 'Important Task Rules'}:**
+1. ${this.t('prompts.dateFixed', { date: targetDate })}
+2. ${this.t('prompts.maxWorkHoursRule')}
+3. ${this.t('prompts.maxSameTaskRule')}
+4. ${this.t('prompts.splitOver4HoursRule2')}
+5. ${this.t('prompts.noTimeConflict')}
+${isToday ? `6. ${this.t('prompts.afterCurrentTimeRule', { time: currentTimeStr })}` : ''}
+7. ${lang === 'ko' ? '**병렬 수행 가능**: 만약 해당 날짜에 일정이 가득 차서 새로운 일정을 추가할 수 없다면, 기존 일정과 동일한 시간대에 병렬로 수행 가능한 일정으로 배정해주세요. 예를 들어, 기존 일정이 "09:00-12:00 회의"라면, 새로운 일정도 "09:00-12:00" 시간대에 배정하여 병렬로 수행할 수 있도록 해주세요. 이 경우 scheduleArray에 동일한 time 값을 가진 일정을 포함시켜주세요.' : '**Parallel Execution Allowed**: If the target date is fully booked and a new schedule cannot be added, assign it as a parallel task at the same time slot as existing schedules. For example, if an existing schedule is "09:00-12:00 Meeting", assign the new schedule also at "09:00-12:00" to allow parallel execution. In this case, include schedules with the same time value in scheduleArray.'}
 
-**JSON 응답 형식:**
+**${lang === 'ko' ? 'JSON 응답 형식' : 'JSON Response Format'}:**
 {
-  "suggestedTitle": "간결한 제목 (10자 이내)",
-  "suggestedTime": "HH:MM (시작 시간)",
-  "timeSlot": "오전/오후",
+  "suggestedTitle": "${lang === 'ko' ? '간결한 제목 (10자 이내)' : 'Concise title (within 10 characters)'}",
+  "suggestedTime": "HH:MM (${lang === 'ko' ? '시작 시간' : 'Start time'})",
+  "timeSlot": "${timeSlotText}",
   "estimatedDuration": ${duration},
   "durationHours": ${durationHours},
   "priority": "${priority || 'medium'}",
   "splitRequired": true/false,
   "scheduleArray": [
-    {"time": "HH:MM", "duration": 분단위숫자, "title": "업무명 (1/N)"}
+    {"time": "HH:MM", "duration": ${lang === 'ko' ? '분단위숫자' : 'minutes'}, "title": "${lang === 'ko' ? '업무명 (1/N)' : 'Task name (1/N)'}", "parallel": true/false}
   ],
-  "recommendations": "시간 배분 안내 (토스체)",
-  "conflictWarning": "충돌 경고 (없으면 null)",
-  "reasoning": "이 시간대를 추천하는 이유"
+  "recommendations": "${lang === 'ko' ? '시간 배분 안내 (토스체)' : 'Time allocation guide (friendly tone)'}",
+  "conflictWarning": "${lang === 'ko' ? '충돌 경고 (없으면 null)' : 'Conflict warning (null if none)'}",
+  "reasoning": "${lang === 'ko' ? '이 시간대를 추천하는 이유' : 'Reason for recommending this time slot'}"
 }
 
-**splitRequired 규칙:**
-- 소요시간이 4시간(240분) 이하: splitRequired: false
-- 소요시간이 4시간(240분) 초과: splitRequired: true, scheduleArray에 4시간 단위로 분할
+**${lang === 'ko' ? 'splitRequired 규칙' : 'splitRequired Rules'}:**
+- ${lang === 'ko' ? '소요시간이 4시간(240분) 이하: splitRequired: false' : 'If duration is 4 hours (240 minutes) or less: splitRequired: false'}
+- ${lang === 'ko' ? '소요시간이 4시간(240분) 초과: splitRequired: true, scheduleArray에 4시간 단위로 분할' : 'If duration exceeds 4 hours (240 minutes): splitRequired: true, split into 4-hour units in scheduleArray'}
 
-응답은 JSON 형식만 제공해주세요.`;
+${this.t('prompts.jsonOnly')}`;
   }
 
   getLocalDateKey(date) {
@@ -227,34 +251,36 @@ ${isToday ? `6. 현재 시간(${currentTimeStr}) 이후의 시간대만 추천�
   }
 
   buildScheduleIntentPrompt({ title, description, priority, userInfo }) {
+    const lang = this.language || 'ko';
     const age = this.calculateAge(userInfo.birthdate);
     const today = new Date().toISOString().split('T')[0];
+    const user = this.t('prompts.user');
+    const member = this.t('prompts.member');
+    const notEntered = this.t('prompts.notEntered');
+    const none = this.t('prompts.none');
     
-    return `당신은 ${userInfo.name || '사용자'}님의 비서예요. 업무 의도를 파악하고 일정 범위를 정해드려요.
+    return `${this.t('prompts.scheduleSecretary', { name: userInfo.name || user })}
 
-**역할: 개인 비서**
-- 제목과 설명을 분석해서 일간/주간/월간/분기 범위를 판단해요
-- 적절한 일정 등록 방식을 결정해드려요
+${this.t('prompts.scheduleSecretaryRole')}
+${this.t('prompts.analyzeScope')}
+${this.t('prompts.determineMethod')}
 
-**사용자 정보:**
-- 이름: ${userInfo.name || '사용자'}님
-- 나이: ${age || '미입력'}세
-- 직업: ${userInfo.job || '미입력'}
-- 성향: ${userInfo.personality || '미입력'}
+**${this.t('prompts.userProfile', { name: userInfo.name || user, job: userInfo.job || notEntered, personality: userInfo.personality || notEntered })}**
+- ${this.t('prompts.age')}: ${age ? `${age}${this.t('prompts.ageUnit')}` : notEntered}
 
-**오늘 날짜:** ${today}
+**${lang === 'ko' ? '오늘 날짜' : 'Today\'s Date'}:** ${today}
 
-**업무 정보:**
-- 제목: ${title}
-- 설명: ${description || '없음'}
-- 우선순위: ${priority}
+**${lang === 'ko' ? '업무 정보' : 'Task Information'}:**
+- ${this.t('prompts.taskTitle')}: ${title}
+- ${this.t('prompts.taskDescription')}: ${description || none}
+- ${this.t('prompts.priority')}: ${priority}
 
-**분석 요청:**
-이 업무가 어느 범위에 해당하는지 판단하고, 일정 등록 방식을 결정해주세요.
-- 오늘 또는 특정 하루에 해야 할 일 → daily
-- 이번 주 내에 해야 할 일 → weekly
-- 이번 달 내에 해야 할 일 → monthly
-- 분기 단위로 진행할 일 → quarterly
+**${lang === 'ko' ? '분석 요청' : 'Analysis Request'}:**
+${this.t('prompts.scopeDecision')}
+${this.t('prompts.dailyScope')}
+${this.t('prompts.weeklyScope')}
+${this.t('prompts.monthlyScope')}
+${this.t('prompts.quarterlyScope')}
 
 다음 JSON 형식으로 응답해주세요:
 {
@@ -287,6 +313,9 @@ ${isToday ? `6. 현재 시간(${currentTimeStr}) 이후의 시간대만 추천�
   }
 
   buildTaskAnalysisPrompt({ title, description, priority, duration, selectedText, userInfo, existingSchedules, clientLocalTime }) {
+    const lang = this.language || 'ko';
+    const locale = lang === 'ko' ? 'ko-KR' : 'en-US';
+    
     // 클라이언트 로컬 시간 (전달되지 않으면 현재 시간 사용)
     const now = clientLocalTime ? new Date(clientLocalTime) : new Date();
     const currentTimeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
@@ -308,111 +337,107 @@ ${isToday ? `6. 현재 시간(${currentTimeStr}) 이후의 시간대만 추천�
     }
 
     // Format existing schedules for context
+    const hoursText = this.t('prompts.hours');
     const scheduleContext = existingSchedules && existingSchedules.length > 0
-      ? `\n기존 일정 목록 (충돌을 피하고 최적의 시간을 제안해야 함):
-${existingSchedules.map(s => `- ${s.time}: ${s.title} (${((s.duration || 60) / 60).toFixed(1)}시간, 우선순위: ${s.priority || 'medium'})`).join('\n')}`
-      : '\n기존 일정: 없음 (자유롭게 시간을 제안할 수 있습니다)';
+      ? `\n${this.t('prompts.existingSchedules')}:\n${existingSchedules.map(s => `- ${s.time}: ${s.title} (${((s.duration || 60) / 60).toFixed(1)}${hoursText}, ${this.t('prompts.priority')}: ${s.priority || 'medium'})`).join('\n')}`
+      : `\n${this.t('prompts.noExistingSchedules')}`;
 
+    const user = this.t('prompts.user');
+    const member = this.t('prompts.member');
+    const notEntered = this.t('prompts.notEntered');
     const userContext = userInfo.name 
-      ? `사용자 정보 (이 정보를 바탕으로 업무 스타일과 에너지 레벨을 고려해야 함):
-- 이름: ${userInfo.name}
-${age ? `- 나이: ${age}세` : ''}
-- 생년월일: ${userInfo.birthdate || '미입력'}
-- 성별: ${userInfo.gender || '미입력'}
-- 직업: ${userInfo.job || '미입력'}
-- 성향 및 업무 스타일: ${userInfo.personality || '미입력'}
-`
+      ? `${this.t('prompts.userInfo')}:\n- ${this.t('prompts.name')}: ${userInfo.name}\n${age ? `- ${this.t('prompts.age')}: ${age}${this.t('prompts.ageUnit')}\n` : ''}- ${this.t('prompts.birthdate')}: ${userInfo.birthdate || notEntered}\n- ${this.t('prompts.gender')}: ${userInfo.gender || notEntered}\n- ${this.t('prompts.job')}: ${userInfo.job || notEntered}\n- ${this.t('prompts.personality')}: ${userInfo.personality || notEntered}\n`
       : '';
 
     // Build context-aware prompt considering user's job and personality
     let jobContext = '';
     if (userInfo.job) {
-      jobContext = `\n직업 관련 고려사항:
-- 직업: ${userInfo.job}
-- 이 직업의 특성상 ${this.getJobCharacteristics(userInfo.job)}을 고려해야 합니다.
-- 업무 시간대와 에너지 패턴을 직업 특성에 맞게 조정해야 합니다.`;
+      const characteristics = this.getJobCharacteristics(userInfo.job);
+      jobContext = `\n${this.t('prompts.jobConsiderations')}\n- ${this.t('prompts.job')}: ${userInfo.job}\n- ${this.t('prompts.jobCharacteristics', { characteristics })}\n- ${this.t('prompts.adjustWorkTime')}`;
     }
 
     let personalityContext = '';
     if (userInfo.personality) {
-      personalityContext = `\n성향 및 업무 스타일 고려사항:
-- 사용자 성향: ${userInfo.personality}
-- 이 성향을 바탕으로 최적의 업무 시간대와 작업 방식을 제안해야 합니다.
-- 사용자의 업무 효율성과 만족도를 최대화할 수 있는 시간 배정을 해야 합니다.`;
+      personalityContext = `\n${this.t('prompts.personalityConsiderations')}\n- ${this.t('prompts.personalityNote', { personality: userInfo.personality })}\n- ${this.t('prompts.optimizeTime')}\n- ${this.t('prompts.maximizeEfficiency')}`;
     }
 
     const tossStyleGuide = `
-**토스 스타일 라이팅 원칙 (반드시 준수):**
-- 해요체 사용: 모든 문장은 '~해요', '~있어요', '~드릴게요', '~보세요'로 끝내세요
-- 간결하게: 한 문장은 가능한 짧고 명확하게
-- 친근하게: 딱딱한 표현 대신 부드럽고 친근한 말투
-- 긍정적으로: 부정적 표현보다 긍정적인 안내
-- 예시: "시간이 충돌합니다" → "이 시간에는 다른 일정이 있어요"
-- 예시: "권장합니다" → "이렇게 해보시면 좋을 것 같아요"
+${this.t('prompts.tossStyleGuide')}
+${this.t('prompts.tossStyle1')}
+${this.t('prompts.tossStyle2')}
+${this.t('prompts.tossStyle3')}
+${this.t('prompts.tossStyle4')}
+${this.t('prompts.tossStyleExample1')}
+${this.t('prompts.tossStyleExample2')}
 `;
 
-    return `당신은 ${userInfo.name || '사용자'}님의 일간 매니저예요. 하루 일정을 친근하고 세심하게 관리해드려요.
+    const workHoursText = lang === 'ko' ? '09:00 ~ 18:00 (8시간)' : '09:00 ~ 18:00 (8 hours)';
+    const none = this.t('prompts.none');
+    const timeSlotText = this.t('prompts.timeSlot');
+    const categoryText = this.t('prompts.category');
+
+    return `${this.t('prompts.dailyManagerFriendly', { name: userInfo.name || user })}
 
 ${tossStyleGuide}
 
-**현재 시간 정보:**
-- 현재 날짜: ${currentDateStr}
-- 현재 시간: ${currentTimeStr}
-- 업무 시간: 09:00 ~ 18:00 (8시간)
+**${lang === 'ko' ? '현재 시간 정보' : 'Current Time Information'}:**
+- ${lang === 'ko' ? '현재 날짜' : 'Current Date'}: ${currentDateStr}
+- ${lang === 'ko' ? '현재 시간' : 'Current Time'}: ${currentTimeStr}
+- ${lang === 'ko' ? '업무 시간' : 'Work Hours'}: ${workHoursText}
 
-**역할: 일간 매니저**
-- 하루 일정을 효율적으로 계획해드려요
-- 시간 충돌을 방지하고 최적의 시간대를 추천해드려요
-- 현재 시간 이후의 시간대만 추천해주세요
+${this.t('prompts.dailyManagerRole')}
+${this.t('prompts.planEfficiently')}
+${this.t('prompts.preventConflict')}
+${this.t('prompts.afterCurrentTimeOnly')}
 
-**사용자 정보:**
+**${this.t('prompts.userProfile', { name: userInfo.name || user, job: userInfo.job || notEntered, personality: userInfo.personality || notEntered })}**
 ${userContext}${jobContext}${personalityContext}
 
-**새로운 할 일:**
-- 제목: ${title}
-- 설명: ${description || '없음'}
-- 우선순위: ${priority}
-- 예상 소요 시간: ${durationHours}시간 (${duration}분)
-${selectedText ? `- 참고 텍스트: "${selectedText}"` : ''}${scheduleContext}
+**${this.t('prompts.newTask')}:**
+- ${this.t('prompts.taskTitle')}: ${title}
+- ${this.t('prompts.taskDescription')}: ${description || none}
+- ${this.t('prompts.priority')}: ${priority}
+- ${this.t('prompts.estimatedDuration')}: ${durationHours}${hoursText} (${duration}${this.t('prompts.minutes')})
+${selectedText ? `- ${this.t('prompts.referenceText')}: "${selectedText}"` : ''}${scheduleContext}
 
-**중요 업무 분할 규칙:**
-1. 하루 최대 업무 시간은 8시간이에요
-2. 동일 업무는 하루 최대 4시간까지만 배정해요
-3. 4시간 초과 업무는 여러 날에 나눠서 등록해야 해요
-4. splitRequired가 true면 scheduleArray에 분할된 일정을 포함해주세요
+**${this.t('prompts.workRules')}:**
+1. ${this.t('prompts.maxWorkHours')}
+2. ${this.t('prompts.maxSameTask')}
+3. ${this.t('prompts.splitOver4Hours')}
+4. ${lang === 'ko' ? 'splitRequired가 true면 scheduleArray에 분할된 일정을 포함해주세요' : 'If splitRequired is true, include split schedules in scheduleArray'}
 
-**중요 지침:**
-1. 기존 일정과 충돌하지 않는 시간을 추천해주세요
-2. 현재 시간(${currentTimeStr}) 이후의 시간대만 추천해주세요
-3. suggestedTitle: 사용자가 입력한 제목을 10자 이내의 간결한 제목으로 정리해주세요
-4. 추천 사항(recommendations)에 시간 가이드를 포함해주세요
-5. 모든 안내는 토스체(해요체)로 친근하게 작성해주세요
+**${this.t('prompts.guidelines')}:**
+1. ${this.t('prompts.noConflict')}
+2. ${this.t('prompts.afterCurrentTime', { time: currentTimeStr })}
+3. ${this.t('prompts.conciseTitle')}
+4. ${this.t('prompts.includeTimeGuide')}
+5. ${this.t('prompts.tossStyle')}
 
-다음 JSON 형식으로 응답해주세요:
+${lang === 'ko' ? '다음 JSON 형식으로 응답해주세요' : 'Please respond in the following JSON format'}:
 {
-  "suggestedTitle": "간결한 제목 (10자 이내)",
-  "suggestedTime": "HH:MM (시작 시간, 현재 시간 이후)",
-  "timeSlot": "오전/오후/저녁",
+  "suggestedTitle": "${lang === 'ko' ? '간결한 제목 (10자 이내)' : 'Concise title (within 10 characters)'}",
+  "suggestedTime": "HH:MM (${lang === 'ko' ? '시작 시간, 현재 시간 이후' : 'Start time, after current time'})",
+  "timeSlot": "${timeSlotText}",
   "estimatedDuration": ${duration || 60},
   "durationHours": ${durationHours},
   "priority": "${priority || 'medium'}",
-  "category": "업무/개인/학습/기타",
+  "category": "${categoryText}",
   "splitRequired": true/false,
   "scheduleArray": [
-    {"date": "YYYY-MM-DD", "time": "HH:MM", "duration": 분단위숫자, "title": "분할된 제목 (1/N)"}
+    {"date": "YYYY-MM-DD", "time": "HH:MM", "duration": ${lang === 'ko' ? '분단위숫자' : 'minutes'}, "title": "${lang === 'ko' ? '분할된 제목 (1/N)' : 'Split title (1/N)'}"}
   ],
-  "recommendations": "HH:MM에 시작해서 HH:MM까지 진행하시면 돼요. (토스체로 친근한 추가 안내)",
-  "conflictWarning": "충돌 경고 메시지 (없으면 null, 있으면 토스체로)",
+  "recommendations": "${lang === 'ko' ? 'HH:MM에 시작해서 HH:MM까지 진행하시면 돼요. (토스체로 친근한 추가 안내)' : 'Start at HH:MM and proceed until HH:MM. (Additional friendly guidance in conversational tone)'}",
+  "conflictWarning": "${lang === 'ko' ? '충돌 경고 메시지 (없으면 null, 있으면 토스체로)' : 'Conflict warning message (null if none, in conversational tone if present)'}",
   "energyLevel": "low/medium/high",
-  "reasoning": "이 시간대를 추천하는 이유 (토스체로 2-3문장)"
+  "reasoning": "${lang === 'ko' ? '이 시간대를 추천하는 이유 (토스체로 2-3문장)' : 'Reason for recommending this time slot (2-3 sentences in conversational tone)'}"
 }
 
-**splitRequired와 scheduleArray 규칙:**
-- 요청된 소요시간이 4시간(240분) 이하면: splitRequired: false, scheduleArray는 단일 일정
-- 요청된 소요시간이 4시간(240분) 초과면: splitRequired: true, 4시간 단위로 분할하여 scheduleArray에 포함
-- 분할 시 각 날짜에 동일 업무는 최대 4시간, 하루 총 업무는 8시간 이내로 배정
+**${this.t('prompts.splitRules')}:**
+- ${this.t('prompts.splitUnder4Hours')}
+- ${this.t('prompts.splitOver4HoursRule')}
+- ${this.t('prompts.splitMaxHours')}
 
-응답은 JSON 형식만 제공하고, 추가 설명은 하지 마세요.`;
+${this.t('prompts.jsonOnly')}`;
   }
 
   getJobCharacteristics(job) {
@@ -572,6 +597,7 @@ ${selectedText ? `- 참고 텍스트: "${selectedText}"` : ''}${scheduleContext}
   }
 
   buildWeeklyPlanPrompt(schedules, userInfo, weekKey) {
+    const lang = this.language || 'ko';
     // Extract all schedules for the week
     const weekStart = new Date();
     weekStart.setDate(weekStart.getDate() - weekStart.getDay());
@@ -591,49 +617,57 @@ ${selectedText ? `- 참고 텍스트: "${selectedText}"` : ''}${scheduleContext}
     }
     
     const tossStyleGuide = `
-**토스 스타일 라이팅 원칙 (반드시 준수):**
-- 해요체 사용: 모든 문장은 '~해요', '~있어요', '~드릴게요'로 끝내세요
-- 간결하게: 한 문장은 가능한 짧고 명확하게
-- 친근하게: 딱딱한 표현 대신 부드럽고 친근한 말투
-- 긍정적으로: 부정적 표현보다 긍정적인 안내
+${this.t('prompts.tossStyleGuide')}
+${this.t('prompts.tossStyle1')}
+${this.t('prompts.tossStyle2')}
+${this.t('prompts.tossStyle3')}
+${this.t('prompts.tossStyle4')}
 `;
     
+    const undecided = this.t('prompts.undecided');
+    const minutesText = this.t('prompts.minutes');
     const schedulesText = weekSchedules.length > 0
-      ? weekSchedules.map(s => `- [${s.date}] ${s.time || '미정'}: ${s.title} (${s.duration || 60}분)`).join('\n')
-      : '(이번 주 등록된 일정이 없어요)';
+      ? weekSchedules.map(s => `- [${s.date}] ${s.time || undecided}: ${s.title} (${s.duration || 60}${minutesText})`).join('\n')
+      : `(${this.t('prompts.noScheduleInPeriod', { period: lang === 'ko' ? '주' : 'week' })})`;
     
-    return `당신은 ${userInfo.name || '사용자'}님의 주간 매니저예요. 이번 주 일정을 친근하게 정리해드려요.
+    const user = this.t('prompts.user');
+    const member = this.t('prompts.member');
+    const notEntered = this.t('prompts.notEntered');
+    
+    return `${this.t('prompts.weeklyManager', { name: userInfo.name || user })}
 
 ${tossStyleGuide}
 
-**역할: 주간 매니저**
-- 이번 주 일간 일정들을 통합 분석해요
-- 주간 목표와 핵심 업무를 정리해드려요
-- 효율적인 시간 활용을 도와드려요
+**${lang === 'ko' ? '역할: 주간 매니저' : 'Role: Weekly Manager'}**
+- ${lang === 'ko' ? '이번 주 일간 일정들을 통합 분석해요' : 'Integrate and analyze this week\'s daily schedules'}
+- ${lang === 'ko' ? '주간 목표와 핵심 업무를 정리해드려요' : 'Organize weekly goals and key tasks'}
+- ${lang === 'ko' ? '효율적인 시간 활용을 도와드려요' : 'Help with efficient time management'}
 
-**${userInfo.name || '사용자'}님 정보:**
-- 직업: ${userInfo.job || '미입력'}
-- 성향: ${userInfo.personality || '미입력'}
+**${userInfo.name || user}${lang === 'ko' ? '님 정보' : '\'s Information'}:**
+- ${this.t('prompts.job')}: ${userInfo.job || notEntered}
+- ${lang === 'ko' ? '성향' : 'Personality'}: ${userInfo.personality || notEntered}
 
-**이번 주 일정 (${weekKey}):**
+**${this.t('prompts.thisWeekSchedule')} (${weekKey}):**
 ${schedulesText}
 
-**작성 요청:**
-위 일간 일정을 바탕으로 주간 계획을 토스체로 친근하게 정리해주세요.
-- 일정이 없으면: "이번 주는 아직 등록된 일정이 없어요. 새로운 일정을 추가해보세요!"
-- 일정이 있으면: 핵심 일정 위주로 친근하게 요약해주세요
+**${lang === 'ko' ? '작성 요청' : 'Writing Request'}:**
+${lang === 'ko' ? '위 일간 일정을 바탕으로 주간 계획을 토스체로 친근하게 정리해주세요.' : 'Based on the daily schedules above, organize the weekly plan in a friendly, conversational tone.'}
+- ${lang === 'ko' ? '일정이 없으면' : 'If no schedules'}: "${this.t('prompts.noScheduleInPeriod', { period: lang === 'ko' ? '주' : 'week' })}. ${this.t('prompts.addNewSchedule')}"
+- ${lang === 'ko' ? '일정이 있으면' : 'If schedules exist'}: ${this.t('prompts.friendlySummary')}
 
-다음 JSON 형식으로 응답해주세요:
+${lang === 'ko' ? '다음 JSON 형식으로 응답해주세요' : 'Please respond in the following JSON format'}:
 {
   "weekKey": "${weekKey}",
-  "schedules": [일간 일정 배열],
-  "summary": "이번 주에는 N개의 일정이 있어요. (토스체로 친근하게 요약)"
+  "schedules": [${lang === 'ko' ? '일간 일정 배열' : 'daily schedule array'}],
+  "summary": "${this.t('prompts.scheduleCount', { period: lang === 'ko' ? '주' : 'week', count: 'N' })} (${lang === 'ko' ? '토스체로 친근하게 요약' : 'friendly summary in conversational tone'})"
 }
 
-응답은 JSON 형식만 제공하고, 추가 설명은 하지 마세요.`;
+${this.t('prompts.jsonOnly')}`;
   }
 
   buildMonthlyPlanPrompt(schedules, userInfo, monthKey) {
+    const lang = this.language || 'ko';
+    const locale = lang === 'ko' ? 'ko-KR' : 'en-US';
     // Extract all schedules for the month
     const [year, month] = monthKey.split('-').map(Number);
     const monthStart = new Date(year, month - 1, 1);
@@ -652,47 +686,53 @@ ${schedulesText}
     }
     
     const tossStyleGuide = `
-**토스 스타일 라이팅 원칙 (반드시 준수):**
-- 해요체 사용: 모든 문장은 '~해요', '~있어요', '~드릴게요'로 끝내세요
-- 간결하게: 한 문장은 가능한 짧고 명확하게
-- 친근하게: 딱딱한 표현 대신 부드럽고 친근한 말투
-- 긍정적으로: 부정적 표현보다 긍정적인 안내
+${this.t('prompts.tossStyleGuide')}
+${this.t('prompts.tossStyle1')}
+${this.t('prompts.tossStyle2')}
+${this.t('prompts.tossStyle3')}
+${this.t('prompts.tossStyle4')}
 `;
     
-    const monthName = `${month}월`;
+    const monthName = this.t('prompts.monthName', { month });
+    const undecided = this.t('prompts.undecided');
+    const minutesText = this.t('prompts.minutes');
     const schedulesText = monthSchedules.length > 0
-      ? monthSchedules.map(s => `- [${s.date}] ${s.time || '미정'}: ${s.title} (${s.duration || 60}분)`).join('\n')
-      : `(${monthName}에 등록된 일정이 없어요)`;
+      ? monthSchedules.map(s => `- [${s.date}] ${s.time || undecided}: ${s.title} (${s.duration || 60}${minutesText})`).join('\n')
+      : `(${this.t('prompts.noScheduleInPeriod', { period: monthName })})`;
     
-    return `당신은 ${userInfo.name || '사용자'}님의 월간 매니저예요. 이번 달 일정을 친근하게 정리해드려요.
+    const user = this.t('prompts.user');
+    const member = this.t('prompts.member');
+    const notEntered = this.t('prompts.notEntered');
+    
+    return `${this.t('prompts.monthlyManager', { name: userInfo.name || user })}
 
 ${tossStyleGuide}
 
-**역할: 월간 매니저**
-- 이번 달 일간 일정들을 통합 분석해요
-- 월간 목표와 주요 마일스톤을 정리해드려요
-- 한 달의 흐름을 한눈에 볼 수 있게 도와드려요
+**${lang === 'ko' ? '역할: 월간 매니저' : 'Role: Monthly Manager'}**
+- ${lang === 'ko' ? '이번 달 일간 일정들을 통합 분석해요' : 'Integrate and analyze this month\'s daily schedules'}
+- ${lang === 'ko' ? '월간 목표와 주요 마일스톤을 정리해드려요' : 'Organize monthly goals and key milestones'}
+- ${lang === 'ko' ? '한 달의 흐름을 한눈에 볼 수 있게 도와드려요' : 'Help visualize the flow of the month at a glance'}
 
-**${userInfo.name || '사용자'}님 정보:**
-- 직업: ${userInfo.job || '미입력'}
-- 성향: ${userInfo.personality || '미입력'}
+**${userInfo.name || user}${lang === 'ko' ? '님 정보' : '\'s Information'}:**
+- ${this.t('prompts.job')}: ${userInfo.job || notEntered}
+- ${lang === 'ko' ? '성향' : 'Personality'}: ${userInfo.personality || notEntered}
 
-**이번 달 일정 (${monthName}, ${monthSchedules.length}개):**
+**${this.t('prompts.thisMonthSchedule')} (${monthName}, ${monthSchedules.length}${lang === 'ko' ? '개' : ''}):**
 ${schedulesText}
 
-**작성 요청:**
-위 일간 일정을 바탕으로 월간 계획을 토스체로 친근하게 정리해주세요.
-- 일정이 없으면: "이번 달은 아직 등록된 일정이 없어요. 새로운 일정을 추가해보세요!"
-- 일정이 있으면: 핵심 일정 위주로 친근하게 요약해주세요
+**${lang === 'ko' ? '작성 요청' : 'Writing Request'}:**
+${lang === 'ko' ? '위 일간 일정을 바탕으로 월간 계획을 토스체로 친근하게 정리해주세요.' : 'Based on the daily schedules above, organize the monthly plan in a friendly, conversational tone.'}
+- ${lang === 'ko' ? '일정이 없으면' : 'If no schedules'}: "${this.t('prompts.noScheduleInPeriod', { period: lang === 'ko' ? '달' : 'month' })}. ${this.t('prompts.addNewSchedule')}"
+- ${lang === 'ko' ? '일정이 있으면' : 'If schedules exist'}: ${this.t('prompts.friendlySummary')}
 
-다음 JSON 형식으로 응답해주세요:
+${lang === 'ko' ? '다음 JSON 형식으로 응답해주세요' : 'Please respond in the following JSON format'}:
 {
   "monthKey": "${monthKey}",
-  "schedules": [일간 일정 배열],
-  "summary": "이번 달에는 N개의 일정이 있어요. (토스체로 친근하게 요약)"
+  "schedules": [${lang === 'ko' ? '일간 일정 배열' : 'daily schedule array'}],
+  "summary": "${this.t('prompts.scheduleCount', { period: lang === 'ko' ? '달' : 'month', count: 'N' })} (${lang === 'ko' ? '토스체로 친근하게 요약' : 'friendly summary in conversational tone'})"
 }
 
-응답은 JSON 형식만 제공하고, 추가 설명은 하지 마세요.`;
+${this.t('prompts.jsonOnly')}`;
   }
 
   buildQuarterlyPlanPrompt(schedules, userInfo, quarterKey, quarter, year) {
@@ -714,51 +754,62 @@ ${schedulesText}
       }
     }
     
-    const monthNames = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
+    const lang = this.language || 'ko';
+    const locale = lang === 'ko' ? 'ko-KR' : 'en-US';
+    const monthNames = lang === 'ko' 
+      ? ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월']
+      : ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
     const quarterMonths = `${monthNames[quarterStartMonth]} ~ ${monthNames[quarterEndMonth]}`;
     
     const tossStyleGuide = `
-**토스 스타일 라이팅 원칙 (반드시 준수):**
-- 해요체 사용: 모든 문장은 '~해요', '~있어요', '~드릴게요'로 끝내세요
-- 간결하게: 한 문장은 가능한 짧고 명확하게
-- 친근하게: 딱딱한 표현 대신 부드럽고 친근한 말투
-- 긍정적으로: 부정적 표현보다 긍정적인 안내
+${this.t('prompts.tossStyleGuide')}
+${this.t('prompts.tossStyle1')}
+${this.t('prompts.tossStyle2')}
+${this.t('prompts.tossStyle3')}
+${this.t('prompts.tossStyle4')}
 `;
     
+    const undecided = this.t('prompts.undecided');
+    const minutesText = this.t('prompts.minutes');
     const schedulesText = quarterSchedules.length > 0
-      ? quarterSchedules.map(s => `- [${s.date}] ${s.time || '미정'}: ${s.title} (${s.duration || 60}분)`).join('\n')
-      : `(${quarter}분기에 등록된 일정이 없어요)`;
+      ? quarterSchedules.map(s => `- [${s.date}] ${s.time || undecided}: ${s.title} (${s.duration || 60}${minutesText})`).join('\n')
+      : `(${this.t('prompts.noScheduleInPeriod', { period: this.t('prompts.quarterName', { year, quarter }) })})`;
     
-    return `당신은 ${userInfo.name || '사용자'}님의 분기 매니저예요. 이번 분기 일정을 친근하게 정리해드려요.
+    const user = this.t('prompts.user');
+    const member = this.t('prompts.member');
+    const notEntered = this.t('prompts.notEntered');
+    const quarterName = this.t('prompts.quarterName', { year, quarter });
+    
+    return `${this.t('prompts.quarterlyManager', { name: userInfo.name || user })}
 
 ${tossStyleGuide}
 
-**역할: 분기 매니저**
-- 이번 분기 일간 일정들을 통합 분석해요
-- 분기 목표와 주요 마일스톤을 정리해드려요
-- 3개월의 흐름을 한눈에 볼 수 있게 도와드려요
+**${lang === 'ko' ? '역할: 분기 매니저' : 'Role: Quarterly Manager'}**
+- ${lang === 'ko' ? '이번 분기 일간 일정들을 통합 분석해요' : 'Integrate and analyze this quarter\'s daily schedules'}
+- ${lang === 'ko' ? '분기 목표와 주요 마일스톤을 정리해드려요' : 'Organize quarterly goals and key milestones'}
+- ${lang === 'ko' ? '3개월의 흐름을 한눈에 볼 수 있게 도와드려요' : 'Help visualize the flow of 3 months at a glance'}
 
-**${userInfo.name || '사용자'}님 정보:**
-- 직업: ${userInfo.job || '미입력'}
-- 성향: ${userInfo.personality || '미입력'}
+**${userInfo.name || user}${lang === 'ko' ? '님 정보' : '\'s Information'}:**
+- ${this.t('prompts.job')}: ${userInfo.job || notEntered}
+- ${lang === 'ko' ? '성향' : 'Personality'}: ${userInfo.personality || notEntered}
 
-**이번 분기 (${year}년 ${quarter}분기, ${quarterMonths}):**
-등록된 일정: ${quarterSchedules.length}개
+**${this.t('prompts.thisQuarterSchedule')} (${quarterName}, ${this.t('prompts.quarterMonths', { months: quarterMonths })}):**
+${lang === 'ko' ? '등록된 일정' : 'Registered schedules'}: ${quarterSchedules.length}${lang === 'ko' ? '개' : ''}
 ${schedulesText}
 
-**작성 요청:**
-위 일간 일정을 바탕으로 분기 계획을 토스체로 친근하게 정리해주세요.
-- 일정이 없으면: "이번 분기는 아직 등록된 일정이 없어요. 새로운 일정을 추가해보세요!"
-- 일정이 있으면: 핵심 일정 위주로 친근하게 요약해주세요
+**${lang === 'ko' ? '작성 요청' : 'Writing Request'}:**
+${lang === 'ko' ? '위 일간 일정을 바탕으로 분기 계획을 토스체로 친근하게 정리해주세요.' : 'Based on the daily schedules above, organize the quarterly plan in a friendly, conversational tone.'}
+- ${lang === 'ko' ? '일정이 없으면' : 'If no schedules'}: "${this.t('prompts.noScheduleInPeriod', { period: lang === 'ko' ? '분기' : 'quarter' })}. ${this.t('prompts.addNewSchedule')}"
+- ${lang === 'ko' ? '일정이 있으면' : 'If schedules exist'}: ${this.t('prompts.friendlySummary')}
 
-다음 JSON 형식으로 응답해주세요:
+${lang === 'ko' ? '다음 JSON 형식으로 응답해주세요' : 'Please respond in the following JSON format'}:
 {
   "quarterKey": "${quarterKey}",
-  "schedules": [일간 일정 배열],
-  "summary": "${quarter}분기에는 N개의 일정이 있어요. (토스체로 친근하게 요약)"
+  "schedules": [${lang === 'ko' ? '일간 일정 배열' : 'daily schedule array'}],
+  "summary": "${this.t('prompts.scheduleCount', { period: lang === 'ko' ? '분기' : 'quarter', count: 'N' })} (${lang === 'ko' ? '토스체로 친근하게 요약' : 'friendly summary in conversational tone'})"
 }
 
-응답은 JSON 형식만 제공하고, 추가 설명은 하지 마세요.`;
+${this.t('prompts.jsonOnly')}`;
   }
 
   calculateAge(birthdate) {
@@ -1057,10 +1108,14 @@ ${scheduleList}
     sortSchedules(uniqueMonthlySchedules);
     sortSchedules(uniqueQuarterlySchedules);
     
+    const lang = this.language || 'ko';
     // Format schedules for prompt
+    const undecided = this.t('prompts.undecided');
+    const minutesText = this.t('prompts.minutes');
+    const complete = this.t('prompts.complete');
     const formatSchedules = (arr) => arr.length > 0 
-      ? arr.map(s => `- [${s.date}] ${s.time || '미정'}: ${s.title} (${s.duration || 60}분, 우선순위: ${s.priority || 'medium'}${s.completed ? ', 완료' : ''})`).join('\n')
-      : '(등록된 일정이 없어요)';
+      ? arr.map(s => `- [${s.date}] ${s.time || undecided}: ${s.title} (${s.duration || 60}${minutesText}, ${this.t('prompts.priority')}: ${s.priority || 'medium'}${s.completed ? `, ${complete}` : ''})`).join('\n')
+      : `(${this.t('prompts.noScheduleYet')})`;
     
     console.log('Collected schedules (after dedup):', {
       weekly: uniqueWeeklySchedules.length,
@@ -1069,67 +1124,69 @@ ${scheduleList}
     });
     
     const tossStyleGuide = `
-**토스 스타일 라이팅 원칙 (반드시 준수):**
-- 해요체 사용: 모든 문장은 '~해요', '~있어요', '~드릴게요'로 끝내세요
-- 간결하게: 한 문장은 가능한 짧고 명확하게
-- 친근하게: 딱딱한 표현 대신 부드럽고 친근한 말투
-- 긍정적으로: 부정적 표현보다 긍정적인 안내
-- 예시: "계획이 없습니다" → "아직 등록된 일정이 없어요"
-- 예시: "확인하십시오" → "확인해보세요"
+${this.t('prompts.tossStyleGuide')}
+${this.t('prompts.tossStyle1')}
+${this.t('prompts.tossStyle2')}
+${this.t('prompts.tossStyle3')}
+${this.t('prompts.tossStyle4')}
+${this.t('prompts.tossStyleExample1')}
+- ${lang === 'ko' ? '예시' : 'Example'}: "${lang === 'ko' ? '확인하십시오' : 'Please check'}" → "${lang === 'ko' ? '확인해보세요' : 'Please check'}"
 `;
     
-    return `당신은 사용자의 개인 일정 매니저예요. 일간 일정을 바탕으로 주간, 월간, 분기 계획을 친근하게 정리해드려요.
+    const user = this.t('prompts.user');
+    const member = this.t('prompts.member');
+    const notEntered = this.t('prompts.notEntered');
+    const countText = lang === 'ko' ? '개' : '';
+    
+    return `${this.t('prompts.scheduleManager')}
 
 ${tossStyleGuide}
 
-**이번 주(${keys.weekKey}) 일간 일정 (${uniqueWeeklySchedules.length}개):**
+**${this.t('prompts.thisWeekSchedule')} (${keys.weekKey}) (${uniqueWeeklySchedules.length}${countText}):**
 ${formatSchedules(uniqueWeeklySchedules)}
 
-**이번 달(${keys.monthKey}) 일간 일정 (${uniqueMonthlySchedules.length}개):**
+**${this.t('prompts.thisMonthSchedule')} (${keys.monthKey}) (${uniqueMonthlySchedules.length}${countText}):**
 ${formatSchedules(uniqueMonthlySchedules)}
 
-**이번 분기(${keys.quarterKey}) 일간 일정 (${uniqueQuarterlySchedules.length}개):**
+**${this.t('prompts.thisQuarterSchedule')} (${keys.quarterKey}) (${uniqueQuarterlySchedules.length}${countText}):**
 ${formatSchedules(uniqueQuarterlySchedules)}
 
-**사용자 정보:**
-- 이름: ${userInfo.name || '사용자'}님
-- 직업: ${userInfo.job || '미입력'}
-- 성향: ${userInfo.personality || '미입력'}
+**${this.t('prompts.userProfile', { name: userInfo.name || user, job: userInfo.job || notEntered, personality: userInfo.personality || notEntered })}**
 
-**작성 요청:**
-위 일간 일정 데이터를 기반으로 각 기간별 계획 요약을 작성해주세요.
-- summary는 토스체로 친근하게 작성해주세요
-- 등록된 일정이 없으면 "아직 등록된 일정이 없어요. 새로운 일정을 추가해보세요!" 형태로 안내해주세요
-- 일정이 있으면 주요 일정을 친근하게 요약해주세요
+**${lang === 'ko' ? '작성 요청' : 'Writing Request'}:**
+${lang === 'ko' ? '위 일간 일정 데이터를 기반으로 각 기간별 계획 요약을 작성해주세요.' : 'Based on the daily schedule data above, write a summary for each period.'}
+- ${lang === 'ko' ? 'summary는 토스체로 친근하게 작성해주세요' : 'Write summary in a friendly, conversational tone'}
+- ${lang === 'ko' ? '등록된 일정이 없으면' : 'If no schedules registered'}: "${this.t('prompts.noScheduleYet')}. ${this.t('prompts.addNewSchedule')}" ${lang === 'ko' ? '형태로 안내해주세요' : 'format'}
+- ${lang === 'ko' ? '일정이 있으면 주요 일정을 친근하게 요약해주세요' : 'If schedules exist, summarize key schedules in a friendly way'}
 
-다음 JSON 형식으로 응답해주세요:
+${lang === 'ko' ? '다음 JSON 형식으로 응답해주세요' : 'Please respond in the following JSON format'}:
 {
   "weekly": {
     "weekKey": "${keys.weekKey}",
     "schedules": [
-      { "date": "YYYY-MM-DD", "time": "HH:MM", "title": "일정 제목", "duration": 60, "priority": "medium" }
+      { "date": "YYYY-MM-DD", "time": "HH:MM", "title": "${lang === 'ko' ? '일정 제목' : 'Schedule title'}", "duration": 60, "priority": "medium" }
     ],
-    "summary": "이번 주에는 N개의 일정이 있어요. (토스체로 요약)"
+    "summary": "${this.t('prompts.scheduleCount', { period: lang === 'ko' ? '주' : 'week', count: 'N' })} (${lang === 'ko' ? '토스체로 요약' : 'summary in conversational tone'})"
   },
   "monthly": {
     "monthKey": "${keys.monthKey}",
     "schedules": [
-      { "date": "YYYY-MM-DD", "time": "HH:MM", "title": "일정 제목", "duration": 60, "priority": "medium" }
+      { "date": "YYYY-MM-DD", "time": "HH:MM", "title": "${lang === 'ko' ? '일정 제목' : 'Schedule title'}", "duration": 60, "priority": "medium" }
     ],
-    "summary": "이번 달에는 N개의 일정이 있어요. (토스체로 요약)"
+    "summary": "${this.t('prompts.scheduleCount', { period: lang === 'ko' ? '달' : 'month', count: 'N' })} (${lang === 'ko' ? '토스체로 요약' : 'summary in conversational tone'})"
   },
   "quarterly": {
     "quarterKey": "${keys.quarterKey}",
     "schedules": [
-      { "date": "YYYY-MM-DD", "time": "HH:MM", "title": "일정 제목", "duration": 60, "priority": "medium" }
+      { "date": "YYYY-MM-DD", "time": "HH:MM", "title": "${lang === 'ko' ? '일정 제목' : 'Schedule title'}", "duration": 60, "priority": "medium" }
     ],
-    "summary": "이번 분기에는 N개의 일정이 있어요. (토스체로 요약)"
+    "summary": "${this.t('prompts.scheduleCount', { period: lang === 'ko' ? '분기' : 'quarter', count: 'N' })} (${lang === 'ko' ? '토스체로 요약' : 'summary in conversational tone'})"
   }
 }
 
-**중요: schedules 배열의 각 일정은 반드시 위 형식(date, time, title, duration, priority)을 따라주세요. 일정이 없으면 빈 배열 []을 반환하세요.**
+**${lang === 'ko' ? '중요' : 'Important'}: ${lang === 'ko' ? 'schedules 배열의 각 일정은 반드시 위 형식(date, time, title, duration, priority)을 따라주세요. 일정이 없으면 빈 배열 []을 반환하세요.' : 'Each schedule in the schedules array must follow the format above (date, time, title, duration, priority). Return an empty array [] if there are no schedules.'}**
 
-응답은 JSON 형식만 제공하고, 추가 설명은 하지 마세요.`;
+${this.t('prompts.jsonOnly')}`;
   }
 
   parseSyncResponse(text) {
@@ -1247,61 +1304,76 @@ ${JSON.stringify(schedules, null, 2)}
   buildChatPrompt({ message, userInfo, scheduleContext, clientLocalTime, chatHistory }) {
     const { dailySchedules, weeklyPlan, monthlyPlan, quarterlyPlan } = scheduleContext;
     
+    // Get language for date formatting
+    const lang = this.language || 'ko';
+    const locale = lang === 'ko' ? 'ko-KR' : 'en-US';
+    
     // 오늘 날짜와 시간 정보
     const now = new Date(clientLocalTime);
-    const todayStr = now.toLocaleDateString('ko-KR', { 
+    const todayStr = now.toLocaleDateString(locale, { 
       year: 'numeric', 
       month: 'long', 
       day: 'numeric', 
       weekday: 'long' 
     });
-    const currentTimeStr = now.toLocaleTimeString('ko-KR', { 
+    const currentTimeStr = now.toLocaleTimeString(locale, { 
       hour: '2-digit', 
       minute: '2-digit' 
     });
 
+    // Get translations
+    const noSchedule = this.t('prompts.noSchedule');
+    const completed = this.t('prompts.completed');
+    const scheduled = this.t('prompts.scheduled');
+    const userRole = this.t('prompts.user');
+    const assistantRole = this.t('prompts.assistant');
+    const notEntered = this.t('prompts.notEntered');
+    const member = this.t('prompts.member');
+    const undecided = this.t('prompts.undecided');
+    const hoursText = lang === 'ko' ? '시간' : 'hours';
+
     // 일간 일정 포맷팅
     const formatDailySchedules = (schedules) => {
       if (!schedules || schedules.length === 0) {
-        return '(등록된 일정이 없어요)';
+        return noSchedule;
       }
       return schedules.map(s => {
-        const status = s.completed ? '✅ 완료' : '⏳ 예정';
+        const status = s.completed ? completed : scheduled;
         const durationHours = (s.duration / 60).toFixed(1);
-        return `- [${s.time}] ${s.title} (${durationHours}시간, ${status})`;
+        return `- [${s.time}] ${s.title} (${durationHours}${hoursText}, ${status})`;
       }).join('\n');
     };
 
     // 주간 일정 포맷팅
     const formatWeeklySchedules = (weeklyData) => {
       if (!weeklyData || !weeklyData.schedules || weeklyData.schedules.length === 0) {
-        return '(등록된 일정이 없어요)';
+        return noSchedule;
       }
       return weeklyData.schedules.map(s => {
         const durationHours = ((s.duration || 60) / 60).toFixed(1);
-        return `- [${s.date}] ${s.time || '미정'}: ${s.title} (${durationHours}시간)`;
+        return `- [${s.date}] ${s.time || undecided}: ${s.title} (${durationHours}${hoursText})`;
       }).join('\n');
     };
 
     // 월간 일정 포맷팅
     const formatMonthlySchedules = (monthlyData) => {
       if (!monthlyData || !monthlyData.schedules || monthlyData.schedules.length === 0) {
-        return '(등록된 일정이 없어요)';
+        return noSchedule;
       }
       return monthlyData.schedules.map(s => {
         const durationHours = ((s.duration || 60) / 60).toFixed(1);
-        return `- [${s.date}] ${s.time || '미정'}: ${s.title} (${durationHours}시간)`;
+        return `- [${s.date}] ${s.time || undecided}: ${s.title} (${durationHours}${hoursText})`;
       }).join('\n');
     };
 
     // 분기 일정 포맷팅
     const formatQuarterlySchedules = (quarterlyData) => {
       if (!quarterlyData || !quarterlyData.schedules || quarterlyData.schedules.length === 0) {
-        return '(등록된 일정이 없어요)';
+        return noSchedule;
       }
       return quarterlyData.schedules.map(s => {
         const durationHours = ((s.duration || 60) / 60).toFixed(1);
-        return `- [${s.date}] ${s.time || '미정'}: ${s.title} (${durationHours}시간)`;
+        return `- [${s.date}] ${s.time || undecided}: ${s.title} (${durationHours}${hoursText})`;
       }).join('\n');
     };
 
@@ -1311,59 +1383,54 @@ ${JSON.stringify(schedules, null, 2)}
         return '';
       }
       return history.slice(-6).map(msg => {
-        const role = msg.role === 'user' ? '사용자' : '어시스턴트';
+        const role = msg.role === 'user' ? userRole : assistantRole;
         return `${role}: ${msg.content}`;
       }).join('\n');
     };
 
     const historySection = chatHistory.length > 0 
-      ? `\n## 이전 대화 내역\n${formatChatHistory(chatHistory)}\n` 
+      ? `\n${this.t('prompts.chatHistory')}\n${formatChatHistory(chatHistory)}\n` 
       : '';
 
-    return `당신은 개인 일정 관리를 도와주는 친근한 AI 어시스턴트예요. 사용자의 일정과 계획에 대한 질문에 답변하고, 효율적인 시간 관리를 위한 조언을 제공해요.
+    // Build prompt using i18n
+    const chatAssistant = this.t('prompts.chatAssistant');
+    const personaStyle = this.t('prompts.personaStyle', { name: userInfo.name || member });
+    const currentTimeInfo = this.t('prompts.currentTimeInfo', { today: todayStr, currentTime: currentTimeStr });
+    const userProfile = this.t('prompts.userProfile', { 
+      name: userInfo.name || notEntered, 
+      job: userInfo.job || notEntered, 
+      personality: userInfo.personality || notEntered 
+    });
+    const todaySchedule = this.t('prompts.todaySchedule', { date: this.getLocalDateKey(now) });
+    const thisWeekSchedule = this.t('prompts.thisWeekSchedule');
+    const thisMonthSchedule = this.t('prompts.thisMonthSchedule');
+    const thisQuarterSchedule = this.t('prompts.thisQuarterSchedule');
+    const responseGuidelines = this.t('prompts.responseGuidelines');
+    const userQuestion = this.t('prompts.userQuestion', { message });
 
-## 페르소나 & 말투 스타일
-- 토스(Toss)의 따뜻하고 친근한 말투를 사용해요
-- "~해요", "~이에요", "~네요" 처럼 부드러운 종결어를 사용해요
-- 이모지를 적절히 활용해서 친근감을 더해요 (과하지 않게)
-- 짧고 명확한 문장을 사용하고, 핵심을 먼저 말해요
-- 사용자를 ${userInfo.name || '회원'}님으로 부르며 존중해요
-- 공감과 격려의 표현을 자연스럽게 넣어요
-- 필요할 때는 리스트나 구조화된 형태로 정보를 정리해서 전달해요
+    return `${chatAssistant}
 
-## 현재 시간 정보
-- 오늘: ${todayStr}
-- 현재 시간: ${currentTimeStr}
+${personaStyle}
 
-## 사용자 프로필
-- 이름: ${userInfo.name || '(미입력)'}
-- 직업: ${userInfo.job || '(미입력)'}
-- 성향: ${userInfo.personality || '(미입력)'}
+${currentTimeInfo}
 
-## 오늘의 일정 (${this.getLocalDateKey(now)})
+${userProfile}
+
+${todaySchedule}
 ${formatDailySchedules(dailySchedules)}
 
-## 이번 주 일정
+${thisWeekSchedule}
 ${formatWeeklySchedules(weeklyPlan)}
 
-## 이번 달 일정
+${thisMonthSchedule}
 ${formatMonthlySchedules(monthlyPlan)}
 
-## 이번 분기 일정
+${thisQuarterSchedule}
 ${formatQuarterlySchedules(quarterlyPlan)}
 ${historySection}
-## 응답 가이드라인
-1. 사용자의 일정 데이터를 기반으로 정확한 정보를 제공해요
-2. 일정 관련 질문에는 구체적인 날짜와 시간을 포함해서 답변해요
-3. 일정 추가/수정/삭제는 직접 할 수 없지만, 적절한 조언을 제공할 수 있어요
-4. 업무 효율성, 시간 관리, 우선순위 설정에 대한 조언을 해줄 수 있어요
-5. 사용자의 성향을 고려해서 맞춤형 조언을 제공해요
-6. 너무 길지 않게, 핵심 위주로 답변해요
+${responseGuidelines}
 
-## 사용자 질문
-${message}
-
-위 정보를 참고해서 사용자의 질문에 친근하고 도움이 되는 답변을 해주세요.`;
+${userQuestion}`;
   }
 
   // 날짜 키 생성 헬퍼 (로컬 타임존 기준)

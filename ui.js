@@ -5,6 +5,7 @@
 
 import { StorageManager } from './storage.js';
 import { GeminiAPI } from './gemini.js';
+import { i18n } from './i18n.js';
 
 class ExtensionUI {
   constructor() {
@@ -28,6 +29,20 @@ class ExtensionUI {
 
   async init() {
     console.log('Initializing ExtensionUI...');
+    
+    // Initialize i18n first
+    await i18n.init();
+    
+    // Listen for language changes
+    window.addEventListener('languageChanged', (e) => {
+      // Update GeminiAPI language when language changes
+      if (this.gemini) {
+        this.gemini.language = i18n.getCurrentLanguage();
+      }
+      this.render();
+      this.setupEventListeners();
+      this.loadData();
+    });
     
     // Wait for DOM to be ready
     if (document.readyState === 'loading') {
@@ -53,7 +68,7 @@ class ExtensionUI {
     // Initialize Gemini API
     const settings = await this.storage.getSettings();
     if (settings.geminiApiKey) {
-      this.gemini = new GeminiAPI(settings.geminiApiKey, settings.geminiModel);
+      this.gemini = new GeminiAPI(settings.geminiApiKey, settings.geminiModel, i18n.getCurrentLanguage());
     }
     
     // Render UI
@@ -107,9 +122,9 @@ class ExtensionUI {
     
     container.innerHTML = `
       <div class="header">
-        <h1 class="header-title">dAIly Planner</h1>
+        <h1 class="header-title">${i18n.t('app.title')}</h1>
         <div class="header-actions">
-          <button class="btn btn-icon" id="settings-btn" title="Settings">
+          <button class="btn btn-icon" id="settings-btn" title="${i18n.t('header.settings')}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="3"></circle>
               <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"></path>
@@ -119,12 +134,12 @@ class ExtensionUI {
       </div>
       
       <div class="tabs">
-        <button class="tab active" data-view="daily">일간</button>
-        <button class="tab" data-view="weekly">주간</button>
-        <button class="tab" data-view="monthly">월간</button>
-        <button class="tab" data-view="quarterly">분기</button>
-        <button class="tab" data-view="summary">종합</button>
-        <button class="tab" data-view="chat">문의</button>
+        <button class="tab active" data-view="daily">${i18n.t('tabs.daily')}</button>
+        <button class="tab" data-view="weekly">${i18n.t('tabs.weekly')}</button>
+        <button class="tab" data-view="monthly">${i18n.t('tabs.monthly')}</button>
+        <button class="tab" data-view="quarterly">${i18n.t('tabs.quarterly')}</button>
+        <button class="tab" data-view="summary">${i18n.t('tabs.summary')}</button>
+        <button class="tab" data-view="chat">${i18n.t('tabs.chat')}</button>
       </div>
       
       <div class="content" id="content-area">
@@ -134,8 +149,8 @@ class ExtensionUI {
       <div class="modal-overlay" id="settings-modal">
         <div class="modal">
           <div class="modal-header">
-            <h2 class="modal-title">설정</h2>
-            <button class="modal-close" id="close-settings">✕</button>
+            <h2 class="modal-title">${i18n.t('settings.title')}</h2>
+            <button class="modal-close" id="close-settings">${i18n.t('common.close')}</button>
           </div>
           <div class="modal-content" id="settings-content">
             ${this.renderSettingsForm()}
@@ -146,8 +161,8 @@ class ExtensionUI {
       <div class="modal-overlay" id="add-task-modal">
         <div class="modal">
           <div class="modal-header">
-            <h2 class="modal-title">할 일 추가</h2>
-            <button class="modal-close" id="close-add-task">✕</button>
+            <h2 class="modal-title">${i18n.t('task.add')}</h2>
+            <button class="modal-close" id="close-add-task">${i18n.t('common.close')}</button>
           </div>
           <div class="modal-content" id="add-task-content">
             ${this.renderAddTaskForm()}
@@ -159,7 +174,7 @@ class ExtensionUI {
         <div class="progress-content">
           <div class="progress-spinner"></div>
           <div class="progress-message-container">
-            <div class="progress-message" id="progress-message">일정을 분석하고 있습니다...</div>
+            <div class="progress-message" id="progress-message">${i18n.t('progress.analyzing')}</div>
           </div>
         </div>
       </div>
@@ -186,48 +201,50 @@ class ExtensionUI {
 
   getProgressMessages() {
     return [
-      "📋 일정을 확인하고 있어요",
-      "🔍 꼼꼼히 살펴보는 중이에요",
-      "📊 오늘 일정과 비교해볼게요",
-      "⏰ 최적 시간대를 찾고 있어요",
-      "✍️ 메모를 정리하고 있어요",
-      "📤 주간 계획에 반영할게요",
-      "📅 이번 주 일정을 보고 있어요",
-      "🤔 업무 균형을 맞춰볼게요",
-      "📝 주간 계획을 조율하는 중이에요",
-      "✅ 주간 검토 거의 끝났어요",
-      "📈 월간 목표랑 비교해볼게요",
-      "🎯 우선순위를 조정하고 있어요",
-      "💼 리소스 배분을 확인해요",
-      "📊 분기 계획도 업데이트해요",
-      "🏆 분기 목표를 확인하고 있어요",
-      "🤝 최종 계획을 정리하는 중이에요",
-      "📋 마무리 작업 중이에요",
-      "✨ 거의 다 됐어요!",
-      "🎉 완료됐어요!"
+      i18n.t('progress.checkingSchedule'),
+      i18n.t('progress.reviewingCarefully'),
+      i18n.t('progress.comparingToday'),
+      i18n.t('progress.findingOptimalTime'),
+      i18n.t('progress.organizingNotes'),
+      i18n.t('progress.reflectingWeekly'),
+      i18n.t('progress.reviewingWeek'),
+      i18n.t('progress.balancingWork'),
+      i18n.t('progress.coordinatingWeekly'),
+      i18n.t('progress.weeklyReviewAlmostDone'),
+      i18n.t('progress.comparingMonthly'),
+      i18n.t('progress.adjustingPriority'),
+      i18n.t('progress.checkingResource'),
+      i18n.t('progress.updatingQuarterly'),
+      i18n.t('progress.checkingQuarterly'),
+      i18n.t('progress.organizingFinal'),
+      i18n.t('progress.finishingUp'),
+      i18n.t('progress.almostDone'),
+      i18n.t('progress.completed')
     ];
   }
 
   renderDailyView() {
     const today = new Date();
-    const dateStr = today.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+    const lang = i18n.getCurrentLanguage();
+    const locale = lang === 'ko' ? 'ko-KR' : 'en-US';
+    const dateStr = today.toLocaleDateString(locale, { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
     
     return `
       <div class="card">
         <div class="card-header">
           <div style="display: flex; align-items: center; gap: var(--spacing-md); flex: 1;">
-            <button class="btn btn-icon" id="prev-day-btn" title="이전 날">←</button>
+            <button class="btn btn-icon" id="prev-day-btn" title="${i18n.t('buttons.prevDay')}">←</button>
             <div>
-              <h2 class="card-title">일간 일정</h2>
+              <h2 class="card-title">${i18n.t('daily.title')}</h2>
               <div style="font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-top: var(--spacing-xs);" id="current-date-display">${dateStr}</div>
             </div>
-            <button class="btn btn-icon" id="next-day-btn" title="다음 날">→</button>
+            <button class="btn btn-icon" id="next-day-btn" title="${i18n.t('buttons.nextDay')}">→</button>
           </div>
-          <button class="btn btn-primary" id="add-schedule-btn">일정 추가</button>
+          <button class="btn btn-primary" id="add-schedule-btn">${i18n.t('buttons.addSchedule')}</button>
         </div>
         <div id="schedule-loading" style="display: none; padding: var(--spacing-lg); text-align: center;">
           <div class="loading-spinner" style="margin: 0 auto var(--spacing-md);"></div>
-          <div style="color: var(--color-text-secondary);">AI가 일정을 검토 중입니다...</div>
+          <div style="color: var(--color-text-secondary);">${i18n.t('progress.reviewing')}</div>
         </div>
         <div class="schedule-list" id="daily-schedule-list">
           <!-- Schedule items will be rendered here -->
@@ -237,7 +254,7 @@ class ExtensionUI {
       <div class="modal-overlay" id="schedule-detail-modal">
         <div class="modal">
           <div class="modal-header">
-            <h2 class="modal-title" id="schedule-detail-title">일정 상세</h2>
+            <h2 class="modal-title" id="schedule-detail-title">${i18n.t('modals.scheduleDetail')}</h2>
             <button class="modal-close" id="close-schedule-detail">✕</button>
           </div>
           <div class="modal-content" id="schedule-detail-content">
@@ -260,29 +277,32 @@ class ExtensionUI {
     weekEnd.setDate(weekStart.getDate() + 6);
     
     // Calculate week number in month
-    const monthName = weekStart.toLocaleDateString('ko-KR', { month: 'long' });
+    const lang = i18n.getCurrentLanguage();
+    const locale = lang === 'ko' ? 'ko-KR' : 'en-US';
+    const monthName = weekStart.toLocaleDateString(locale, { month: 'long' });
     const weekOfMonth = Math.ceil((weekStart.getDate() + new Date(weekStart.getFullYear(), weekStart.getMonth(), 1).getDay()) / 7);
-    const weekTitle = `${monthName} ${weekOfMonth}주차`;
+    const weekOfMonthText = i18n.t('dates.weekOfMonth');
+    const weekTitle = lang === 'ko' ? `${monthName} ${weekOfMonth}${weekOfMonthText}` : `${weekOfMonthText} ${weekOfMonth}, ${monthName}`;
     const dateRange = `${weekStart.getMonth() + 1}/${weekStart.getDate()} ~ ${weekEnd.getMonth() + 1}/${weekEnd.getDate()}`;
     
     return `
       <div class="card">
         <div class="card-header">
           <div style="display: flex; align-items: center; gap: var(--spacing-md); flex: 1;">
-            <button class="btn btn-icon" id="prev-week-btn" title="이전 주">←</button>
+            <button class="btn btn-icon" id="prev-week-btn" title="${i18n.t('buttons.prevWeek')}">←</button>
             <div>
-              <h2 class="card-title">주간 업무 계획</h2>
+              <h2 class="card-title">${i18n.t('weekly.title')}</h2>
               <div id="current-week-display" style="margin-top: var(--spacing-xs);">
                 <div style="font-size: var(--font-size-sm); color: var(--color-text-secondary);">${weekTitle}</div>
                 <div style="font-size: var(--font-size-xs); color: var(--color-text-tertiary); font-style: italic;">${dateRange}</div>
               </div>
             </div>
-            <button class="btn btn-icon" id="next-week-btn" title="다음 주">→</button>
+            <button class="btn btn-icon" id="next-week-btn" title="${i18n.t('buttons.nextWeek')}">→</button>
           </div>
         </div>
         <div class="weekly-plan" id="weekly-plan">
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
-            아직 주간 계획이 없어요. 일정을 등록하면 자동으로 만들어드릴게요!
+            ${i18n.t('weekly.noPlan')}
           </div>
         </div>
       </div>
@@ -291,23 +311,25 @@ class ExtensionUI {
 
   renderMonthlyView() {
     const today = this.currentMonth || new Date();
-    const monthStr = today.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long' });
+    const lang = i18n.getCurrentLanguage();
+    const locale = lang === 'ko' ? 'ko-KR' : 'en-US';
+    const monthStr = today.toLocaleDateString(locale, { year: 'numeric', month: 'long' });
     
     return `
       <div class="card">
         <div class="card-header">
           <div style="display: flex; align-items: center; gap: var(--spacing-md); flex: 1;">
-            <button class="btn btn-icon" id="prev-month-btn" title="이전 달">←</button>
+            <button class="btn btn-icon" id="prev-month-btn" title="${i18n.t('buttons.prevMonth')}">←</button>
             <div>
-              <h2 class="card-title">월간 업무 계획</h2>
+              <h2 class="card-title">${i18n.t('monthly.title')}</h2>
               <div style="font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-top: var(--spacing-xs);" id="current-month-display">${monthStr}</div>
             </div>
-            <button class="btn btn-icon" id="next-month-btn" title="다음 달">→</button>
+            <button class="btn btn-icon" id="next-month-btn" title="${i18n.t('buttons.nextMonth')}">→</button>
           </div>
         </div>
         <div class="monthly-plan" id="monthly-plan">
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
-            아직 월간 계획이 없어요. 일정을 등록하면 자동으로 만들어드릴게요!
+            ${i18n.t('monthly.noPlan')}
           </div>
         </div>
       </div>
@@ -318,32 +340,33 @@ class ExtensionUI {
     const today = new Date();
     const currentQuarter = this.currentQuarter || Math.ceil((today.getMonth() + 1) / 3);
     const currentYear = this.currentQuarterYear || today.getFullYear();
-    const quarterStr = `${currentYear}년 ${currentQuarter}분기`;
+    const quarterStr = i18n.t('quarterly.quarter', { year: currentYear, quarter: currentQuarter });
     
     // Calculate quarter date range
     const quarterStartMonth = (currentQuarter - 1) * 3;
     const quarterEndMonth = quarterStartMonth + 2;
-    const monthNames = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
+    const monthNamesStr = i18n.t('dates.months');
+    const monthNames = monthNamesStr.split(',');
     const dateRange = `${monthNames[quarterStartMonth]} ~ ${monthNames[quarterEndMonth]}`;
     
     return `
       <div class="card">
         <div class="card-header">
           <div style="display: flex; align-items: center; gap: var(--spacing-md); flex: 1;">
-            <button class="btn btn-icon" id="prev-quarter-btn" title="이전 분기">←</button>
+            <button class="btn btn-icon" id="prev-quarter-btn" title="${i18n.t('buttons.prevQuarter')}">←</button>
             <div>
-              <h2 class="card-title">분기 업무 계획</h2>
+              <h2 class="card-title">${i18n.t('quarterly.title')}</h2>
               <div id="current-quarter-display" style="margin-top: var(--spacing-xs);">
                 <div style="font-size: var(--font-size-sm); color: var(--color-text-secondary);">${quarterStr}</div>
                 <div style="font-size: var(--font-size-xs); color: var(--color-text-tertiary); font-style: italic;">${dateRange}</div>
               </div>
             </div>
-            <button class="btn btn-icon" id="next-quarter-btn" title="다음 분기">→</button>
+            <button class="btn btn-icon" id="next-quarter-btn" title="${i18n.t('buttons.nextQuarter')}">→</button>
           </div>
         </div>
         <div class="quarterly-plan" id="quarterly-plan">
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
-            아직 분기 계획이 없어요. 일정을 등록하면 자동으로 만들어드릴게요!
+            ${i18n.t('quarterly.noPlan')}
           </div>
         </div>
       </div>
@@ -358,7 +381,7 @@ class ExtensionUI {
       <div class="card">
         <div class="card-header">
           <div>
-            <h2 class="card-title">종합 계획</h2>
+            <h2 class="card-title">${i18n.t('summary.title')}</h2>
             <div style="font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-top: var(--spacing-xs);">${dateStr}</div>
           </div>
         </div>
@@ -377,8 +400,8 @@ class ExtensionUI {
         <div class="chat-header">
           <div class="chat-header-icon">💬</div>
           <div class="chat-header-content">
-            <h2 class="chat-header-title">일정 도우미</h2>
-            <p class="chat-header-subtitle">일정에 대해 무엇이든 물어보세요</p>
+            <h2 class="chat-header-title">${i18n.t('chat.title')}</h2>
+            <p class="chat-header-subtitle">${i18n.t('chat.subtitle')}</p>
           </div>
         </div>
         
@@ -391,10 +414,10 @@ class ExtensionUI {
             <textarea 
               class="chat-input" 
               id="chat-input" 
-              placeholder="일정에 대해 질문해주세요."
+              placeholder="${i18n.t('chat.placeholder')}"
               rows="1"
             ></textarea>
-            <button class="chat-send-btn" id="chat-send-btn" title="전송">
+            <button class="chat-send-btn" id="chat-send-btn" title="${i18n.t('chat.send')}">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 <line x1="22" y1="2" x2="11" y2="13"></line>
                 <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
@@ -402,7 +425,7 @@ class ExtensionUI {
             </button>
           </div>
           <div class="chat-input-hint">
-            Enter로 전송 • Shift+Enter로 줄바꿈
+            ${i18n.t('chat.hint')}
           </div>
         </div>
       </div>
@@ -414,16 +437,15 @@ class ExtensionUI {
       return `
         <div class="chat-welcome">
           <div class="chat-welcome-icon">🤖</div>
-          <h3 class="chat-welcome-title">안녕하세요! 일정 도우미예요</h3>
+          <h3 class="chat-welcome-title">${i18n.t('chat.welcome.title')}</h3>
           <p class="chat-welcome-text">
-            일정에 대해 궁금한 점이 있으시면 편하게 물어봐 주세요.
-            오늘, 이번 주, 이번 달 일정을 확인하고 조언해 드릴게요.
+            ${i18n.t('chat.welcome.text')}
           </p>
           <div class="chat-suggestions">
-            <button class="chat-suggestion-btn" data-suggestion="오늘 일정 알려줘">📅 오늘 일정 알려줘</button>
-            <button class="chat-suggestion-btn" data-suggestion="이번 주에 바쁜 날은 언제야?">📊 이번 주에 바쁜 날은?</button>
-            <button class="chat-suggestion-btn" data-suggestion="시간 관리 팁 좀 줘">💡 시간 관리 팁</button>
-            <button class="chat-suggestion-btn" data-suggestion="이번 달 일정 요약해줘">📆 이번 달 일정 요약</button>
+            <button class="chat-suggestion-btn" data-suggestion="${i18n.t('chat.welcome.suggestions.today').replace('📅 ', '')}">${i18n.t('chat.welcome.suggestions.today')}</button>
+            <button class="chat-suggestion-btn" data-suggestion="${i18n.t('chat.welcome.suggestions.busy').replace('📊 ', '')}">${i18n.t('chat.welcome.suggestions.busy')}</button>
+            <button class="chat-suggestion-btn" data-suggestion="${i18n.t('chat.welcome.suggestions.tips').replace('💡 ', '')}">${i18n.t('chat.welcome.suggestions.tips')}</button>
+            <button class="chat-suggestion-btn" data-suggestion="${i18n.t('chat.welcome.suggestions.monthly').replace('📆 ', '')}">${i18n.t('chat.welcome.suggestions.monthly')}</button>
           </div>
         </div>
       `;
@@ -481,61 +503,69 @@ class ExtensionUI {
       <form id="settings-form">
         <div style="display: flex; gap: var(--spacing-md);">
           <div class="input-group" style="flex: 1;">
-            <label class="input-label">이름</label>
-            <input type="text" class="input" id="setting-name" placeholder="이름">
+          <label class="input-label">${i18n.t('settings.name')}</label>
+          <input type="text" class="input" id="setting-name" placeholder="${i18n.t('settings.name')}">
           </div>
           <div class="input-group" style="flex: 1;">
-            <label class="input-label">생년월일</label>
+            <label class="input-label">${i18n.t('settings.birthdate')}</label>
             <input type="date" class="input" id="setting-birthdate">
           </div>
         </div>
         
         <div style="display: flex; gap: var(--spacing-md);">
           <div class="input-group" style="flex: 1;">
-            <label class="input-label">성별</label>
-            <select class="input" id="setting-gender">
-              <option value="">선택</option>
-              <option value="male">남성</option>
-              <option value="female">여성</option>
-              <option value="other">기타</option>
-            </select>
+          <label class="input-label">${i18n.t('settings.gender')}</label>
+          <select class="input" id="setting-gender">
+            <option value="">${i18n.t('settings.genderSelect')}</option>
+            <option value="male">${i18n.t('settings.genderMale')}</option>
+            <option value="female">${i18n.t('settings.genderFemale')}</option>
+            <option value="other">${i18n.t('settings.genderOther')}</option>
+          </select>
           </div>
           <div class="input-group" style="flex: 1;">
-            <label class="input-label">직업</label>
-            <input type="text" class="input" id="setting-job" placeholder="직업">
+          <label class="input-label">${i18n.t('settings.job')}</label>
+          <input type="text" class="input" id="setting-job" placeholder="${i18n.t('settings.job')}">
           </div>
         </div>
         
         <div class="input-group">
-          <label class="input-label">성향</label>
-          <textarea class="input input-textarea" id="setting-personality" placeholder="당신의 성향, 업무 스타일 등을 입력하세요" style="min-height: 60px;"></textarea>
+          <label class="input-label">${i18n.t('settings.personality')}</label>
+          <textarea class="input input-textarea" id="setting-personality" placeholder="${i18n.t('settings.personalityPlaceholder')}" style="min-height: 60px;"></textarea>
         </div>
         
         <div class="input-group">
-          <label class="input-label">Gemini API Key</label>
-          <input type="password" class="input" id="setting-api-key" placeholder="Google Gemini API 키를 입력하세요">
+          <label class="input-label">${i18n.t('settings.apiKey')}</label>
+          <input type="password" class="input" id="setting-api-key" placeholder="${i18n.t('settings.apiKeyPlaceholder')}">
           <small style="color: var(--color-text-tertiary); margin-top: var(--spacing-xs);">
-            API 키는 안전하게 로컬에 저장됩니다.
+            ${i18n.t('settings.apiKeyNote')}
           </small>
         </div>
         
         <div class="input-group">
           <label class="input-label">Gemini 모델</label>
           <select class="input" id="setting-model">
-            <option value="gemini-2.5-flash">Gemini 2.5 Flash (권장 - 빠르고 스마트함)</option>
-            <option value="gemini-2.5-pro">Gemini 2.5 Pro (고급 사고 모델)</option>
-            <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (매우 빠름)</option>
-            <option value="gemini-3-pro-preview">Gemini 3 Pro Preview (최고 지능)</option>
-            <option value="gemini-2.0-flash">Gemini 2.0 Flash (2세대 워크호스)</option>
-            <option value="gemini-2.0-flash-lite">Gemini 2.0 Flash-Lite (2세대 고속)</option>
+            <option value="gemini-2.5-flash">${i18n.t('settings.models.flash')}</option>
+            <option value="gemini-2.5-pro">${i18n.t('settings.models.pro')}</option>
+            <option value="gemini-2.5-flash-lite">${i18n.t('settings.models.flashLite')}</option>
+            <option value="gemini-3-pro-preview">${i18n.t('settings.models.proPreview')}</option>
+            <option value="gemini-2.0-flash">${i18n.t('settings.models.flash20')}</option>
+            <option value="gemini-2.0-flash-lite">${i18n.t('settings.models.flashLite20')}</option>
           </select>
           <small style="color: var(--color-text-tertiary); margin-top: var(--spacing-xs);">
-            사용할 Gemini 모델을 선택하세요.
+            ${i18n.t('settings.modelNote')}
           </small>
         </div>
         
+        <div class="input-group">
+          <label class="input-label">${i18n.t('settings.language')}</label>
+          <select class="input" id="setting-language">
+            <option value="ko" ${i18n.getCurrentLanguage() === 'ko' ? 'selected' : ''}>${i18n.t('settings.languageKo')}</option>
+            <option value="en" ${i18n.getCurrentLanguage() === 'en' ? 'selected' : ''}>${i18n.t('settings.languageEn')}</option>
+          </select>
+        </div>
+        
         <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: var(--spacing-lg);">
-          저장
+          ${i18n.t('settings.save')}
         </button>
       </form>
     `;
@@ -544,7 +574,7 @@ class ExtensionUI {
   renderAddTaskForm() {
     const selectedTextSection = this.selectedText ? `
         <div class="input-group" id="selected-text-group">
-          <label class="input-label">선택한 텍스트</label>
+          <label class="input-label">${i18n.t('task.selectedText')}</label>
           <div class="card" style="padding: var(--spacing-md); background: var(--color-bg-elevated);">
             <div id="selected-text-preview" style="color: var(--color-text-secondary); font-style: italic;">
               ${this.selectedText}
@@ -558,33 +588,33 @@ class ExtensionUI {
         ${selectedTextSection}
         
         <div class="input-group">
-          <label class="input-label">할 일 제목</label>
-          <input type="text" class="input" id="task-title" placeholder="할 일 제목을 입력하세요" required>
+          <label class="input-label">${i18n.t('task.title')}</label>
+          <input type="text" class="input" id="task-title" placeholder="${i18n.t('task.titlePlaceholder')}" required>
         </div>
         
         <div class="input-group">
-          <label class="input-label">설명</label>
-          <textarea class="input input-textarea" id="task-description" style="min-height: 150px;" placeholder="일정에 대한 상세 설명을 입력하세요.&#10;&#10;예시:&#10;- 약 3시간 소요 예정&#10;- 회의실 A에서 진행&#10;- 오후 3시경 종료 예상&#10;- 12월 15일~18일 출장"></textarea>
+          <label class="input-label">${i18n.t('task.description')}</label>
+          <textarea class="input input-textarea" id="task-description" style="min-height: 150px;" placeholder="${i18n.t('task.descriptionPlaceholder')}"></textarea>
         </div>
         
         <div style="display: flex; gap: var(--spacing-md);">
           <div class="input-group" style="flex: 1;">
-            <label class="input-label">우선순위</label>
+            <label class="input-label">${i18n.t('task.priority')}</label>
             <select class="input" id="task-priority">
-              <option value="low">낮음</option>
-              <option value="medium" selected>보통</option>
-              <option value="high">높음</option>
+              <option value="low">${i18n.t('task.priorityLow')}</option>
+              <option value="medium" selected>${i18n.t('task.priorityMedium')}</option>
+              <option value="high">${i18n.t('task.priorityHigh')}</option>
             </select>
           </div>
           
           <div class="input-group" style="flex: 1;">
-            <label class="input-label">예상 소요 시간</label>
-            <input type="number" class="input" id="task-duration" placeholder="시간 단위 (예: 1.5)" min="0.5" step="0.5">
+            <label class="input-label">${i18n.t('task.duration')}</label>
+            <input type="number" class="input" id="task-duration" placeholder="${i18n.t('task.durationPlaceholder')}" min="0.5" step="0.5">
           </div>
         </div>
         
         <button type="submit" class="btn btn-primary" id="submit-task-btn" style="width: 100%; margin-top: var(--spacing-lg);">
-          <span id="submit-task-text">AI 분석 및 일정 추가</span>
+          <span id="submit-task-text">${i18n.t('task.submit')}</span>
           <span id="submit-task-spinner" class="loading-spinner" style="display: none; margin-left: var(--spacing-sm);"></span>
         </button>
       </form>
@@ -907,6 +937,18 @@ class ExtensionUI {
 
   switchView(view) {
     console.log('Switching view to:', view);
+    
+    // 문의 탭을 다시 클릭한 경우 상태 초기화
+    if (view === 'chat' && this.currentView === 'chat') {
+      this.chatMessages = [];
+      this.isChatLoading = false;
+      // 로딩 인디케이터가 있다면 제거
+      const loadingIndicator = this.shadowRoot.querySelector('.chat-loading');
+      if (loadingIndicator) {
+        loadingIndicator.remove();
+      }
+    }
+    
     this.currentView = view;
     
     // Update tabs
@@ -1012,18 +1054,24 @@ class ExtensionUI {
       geminiModel: this.shadowRoot.getElementById('setting-model').value
     };
     
+    // Handle language change
+    const languageSelect = this.shadowRoot.getElementById('setting-language');
+    if (languageSelect && languageSelect.value !== i18n.getCurrentLanguage()) {
+      await i18n.setLanguage(languageSelect.value);
+    }
+    
     await this.storage.saveSettings(settings);
     
     // Reinitialize Gemini API if key or model changed
     if (settings.geminiApiKey) {
-      this.gemini = new GeminiAPI(settings.geminiApiKey, settings.geminiModel);
+      this.gemini = new GeminiAPI(settings.geminiApiKey, settings.geminiModel, i18n.getCurrentLanguage());
     }
     
     // Close modal
     this.shadowRoot.getElementById('settings-modal').classList.remove('active');
     
     // Show success toast
-    this.showToast('설정이 저장되었습니다.', 'success');
+    this.showToast(i18n.t('settings.saved'), 'success');
   }
 
   showAddTaskModal(selectedText = null) {
@@ -1152,25 +1200,27 @@ class ExtensionUI {
       // Show daily schedules if no AI summary yet
       this.renderWeeklyPlanData({
         schedules: weekSchedules,
-        summary: `이번 주에 ${weekSchedules.length}개의 일정이 있어요.`
+        summary: i18n.t('summary.weekSummary', { count: weekSchedules.length })
       });
     } else {
       if (weeklyPlanDiv) {
         weeklyPlanDiv.innerHTML = `
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
-            아직 이번 주 일정이 없어요. 일정을 등록해보세요!
+            ${i18n.t('summary.noWeekSchedule')}
           </div>
         `;
       }
     }
     
-    // Update week display with "12월 1주차" format
+    // Update week display with language-specific format
     const weekDisplay = this.shadowRoot.getElementById('current-week-display');
     if (weekDisplay) {
-      // Calculate week number in month
-      const monthName = weekStart.toLocaleDateString('ko-KR', { month: 'long' });
+      const lang = i18n.getCurrentLanguage();
+      const locale = lang === 'ko' ? 'ko-KR' : 'en-US';
+      const monthName = weekStart.toLocaleDateString(locale, { month: 'long' });
       const weekOfMonth = Math.ceil((weekStart.getDate() + new Date(weekStart.getFullYear(), weekStart.getMonth(), 1).getDay()) / 7);
-      const weekTitle = `${monthName} ${weekOfMonth}주차`;
+      const weekOfMonthText = i18n.t('dates.weekOfMonth');
+      const weekTitle = lang === 'ko' ? `${monthName} ${weekOfMonth}${weekOfMonthText}` : `${weekOfMonthText} ${weekOfMonth}, ${monthName}`;
       const dateRange = `${weekStart.getMonth() + 1}/${weekStart.getDate()} ~ ${weekEnd.getMonth() + 1}/${weekEnd.getDate()}`;
       
       weekDisplay.innerHTML = `
@@ -1221,13 +1271,13 @@ class ExtensionUI {
       // Show daily schedules if no AI summary yet
       this.renderMonthlyPlanData({
         schedules: monthSchedules,
-        summary: `이번 달에 ${monthSchedules.length}개의 일정이 있어요.`
+        summary: i18n.t('summary.monthSummary', { count: monthSchedules.length })
       });
     } else {
       if (monthlyPlanDiv) {
         monthlyPlanDiv.innerHTML = `
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
-            아직 이번 달 일정이 없어요. 일정을 등록해보세요!
+            ${i18n.t('summary.noMonthSchedule')}
           </div>
         `;
       }
@@ -1288,13 +1338,13 @@ class ExtensionUI {
       // Show daily schedules if no AI summary yet
       this.renderQuarterlyPlanData({
         schedules: quarterSchedules,
-        summary: `${currentQuarter}분기에 ${quarterSchedules.length}개의 일정이 있어요.`
+        summary: i18n.t('summary.quarterSummary', { quarter: currentQuarter, count: quarterSchedules.length })
       });
     } else {
       if (quarterlyPlanDiv) {
         quarterlyPlanDiv.innerHTML = `
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
-            아직 ${currentQuarter}분기 일정이 없어요. 일정을 등록해보세요!
+            ${i18n.t('summary.noQuarterSchedule', { quarter: currentQuarter })}
           </div>
         `;
       }
@@ -1303,8 +1353,9 @@ class ExtensionUI {
     // Update quarter display
     const quarterDisplay = this.shadowRoot.getElementById('current-quarter-display');
     if (quarterDisplay) {
-      const quarterStr = `${currentYear}년 ${currentQuarter}분기`;
-      const monthNames = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
+      const quarterStr = i18n.t('quarterly.quarter', { year: currentYear, quarter: currentQuarter });
+      const monthNamesStr = i18n.t('dates.months');
+      const monthNames = monthNamesStr.split(',');
       const dateRange = `${monthNames[quarterStartMonth]} ~ ${monthNames[quarterEndMonth]}`;
       
       quarterDisplay.innerHTML = `
@@ -1381,16 +1432,21 @@ class ExtensionUI {
     const completedCount = sortedSchedules.filter(s => s.completed).length;
     const totalCount = sortedSchedules.length;
     
-    // Format today's date in Korean
-    const todayStr = today.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
+    // Format today's date based on language
+    const lang = i18n.getCurrentLanguage();
+    const locale = lang === 'ko' ? 'ko-KR' : 'en-US';
+    const todayStr = today.toLocaleDateString(locale, { month: 'long', day: 'numeric', weekday: 'short' });
+    const completedText = i18n.t('prompts.complete');
+    const urgentText = i18n.t('prompts.urgent');
+    const undecidedText = i18n.t('prompts.undecided');
     
     summaryContent.innerHTML = `
       <div class="summary-sections">
         <!-- 일간 일정 섹션 -->
         <div class="summary-section" style="margin-bottom: var(--spacing-xl);">
           <h3 style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-accent); margin-bottom: var(--spacing-md);">
-            📅 오늘의 일정 <span style="font-size: var(--font-size-sm); color: var(--color-text-secondary);">(${todayStr})</span>
-            ${totalCount > 0 ? `<span style="font-size: var(--font-size-sm); color: var(--color-success); margin-left: var(--spacing-sm);">${completedCount}/${totalCount} 완료</span>` : ''}
+            ${i18n.t('summary.todaySchedule')} <span style="font-size: var(--font-size-sm); color: var(--color-text-secondary);">(${todayStr})</span>
+            ${totalCount > 0 ? `<span style="font-size: var(--font-size-sm); color: var(--color-success); margin-left: var(--spacing-sm);">${completedCount}/${totalCount} ${completedText}</span>` : ''}
           </h3>
           <div style="background: var(--color-bg-elevated); border-radius: var(--radius-md); padding: var(--spacing-md);">
             ${sortedSchedules.length > 0 
@@ -1404,46 +1460,46 @@ class ExtensionUI {
                   return `
                     <div style="padding: var(--spacing-sm) 0; border-bottom: 1px solid var(--color-border); display: flex; align-items: center; gap: var(--spacing-sm);">
                       <span style="color: ${checkColor}; font-size: 14px;">${checkMark}</span>
-                      <span style="color: var(--color-text-accent); font-weight: var(--font-weight-medium); min-width: 80px; ${completedStyle}">${s.time || '미정'} - ${endTime}</span>
+                      <span style="color: var(--color-text-accent); font-weight: var(--font-weight-medium); min-width: 80px; ${completedStyle}">${s.time || undecidedText} - ${endTime}</span>
                       <span style="${completedStyle}">${s.title}</span>
-                      ${s.priority === 'high' ? '<span style="color: var(--color-error); font-size: var(--font-size-xs); margin-left: auto;">긴급</span>' : ''}
+                      ${s.priority === 'high' ? `<span style="color: var(--color-error); font-size: var(--font-size-xs); margin-left: auto;">${urgentText}</span>` : ''}
                     </div>
                   `;
                 }).join('')
-              : '<div style="color: var(--color-text-tertiary); text-align: center; padding: var(--spacing-md);">아직 오늘 일정이 없어요. 새로운 일정을 추가해보세요!</div>'
+              : `<div style="color: var(--color-text-tertiary); text-align: center; padding: var(--spacing-md);">${i18n.t('summary.noTodaySchedule')}</div>`
             }
           </div>
         </div>
         
         <!-- 주간 계획 섹션 -->
         <div class="summary-section" style="margin-bottom: var(--spacing-xl);">
-          <h3 style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-accent); margin-bottom: var(--spacing-md);">📊 이번 주 계획</h3>
+          <h3 style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-accent); margin-bottom: var(--spacing-md);">${i18n.t('summary.weeklyPlan')}</h3>
           <div style="background: var(--color-bg-elevated); border-radius: var(--radius-md); padding: var(--spacing-md);">
             ${currentWeekPlan && currentWeekPlan.summary 
               ? `<div style="color: var(--color-text-secondary); line-height: 1.6;">${currentWeekPlan.summary}</div>`
-              : '<div style="color: var(--color-text-tertiary); text-align: center; padding: var(--spacing-md);">아직 주간 계획이 없어요. 일정을 등록하면 자동으로 생성돼요!</div>'
+              : `<div style="color: var(--color-text-tertiary); text-align: center; padding: var(--spacing-md);">${i18n.t('summary.noWeeklyPlan')}</div>`
             }
           </div>
         </div>
         
         <!-- 월간 계획 섹션 -->
         <div class="summary-section" style="margin-bottom: var(--spacing-xl);">
-          <h3 style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-accent); margin-bottom: var(--spacing-md);">📈 이번 달 계획</h3>
+          <h3 style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-accent); margin-bottom: var(--spacing-md);">${i18n.t('summary.monthlyPlan')}</h3>
           <div style="background: var(--color-bg-elevated); border-radius: var(--radius-md); padding: var(--spacing-md);">
             ${currentMonthPlan && currentMonthPlan.summary 
               ? `<div style="color: var(--color-text-secondary); line-height: 1.6;">${currentMonthPlan.summary}</div>`
-              : '<div style="color: var(--color-text-tertiary); text-align: center; padding: var(--spacing-md);">아직 월간 계획이 없어요. 일정을 등록하면 자동으로 생성돼요!</div>'
+              : `<div style="color: var(--color-text-tertiary); text-align: center; padding: var(--spacing-md);">${i18n.t('summary.noMonthlyPlan')}</div>`
             }
           </div>
         </div>
         
         <!-- 분기 계획 섹션 -->
         <div class="summary-section" style="margin-bottom: var(--spacing-xl);">
-          <h3 style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-accent); margin-bottom: var(--spacing-md);">🎯 ${currentQuarter}분기 계획</h3>
+          <h3 style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-accent); margin-bottom: var(--spacing-md);">${i18n.t('summary.quarterlyPlan', { quarter: currentQuarter })}</h3>
           <div style="background: var(--color-bg-elevated); border-radius: var(--radius-md); padding: var(--spacing-md);">
             ${currentQuarterPlan && currentQuarterPlan.summary 
               ? `<div style="color: var(--color-text-secondary); line-height: 1.6;">${currentQuarterPlan.summary}</div>`
-              : '<div style="color: var(--color-text-tertiary); text-align: center; padding: var(--spacing-md);">아직 분기 계획이 없어요. 일정을 등록하면 자동으로 생성돼요!</div>'
+              : `<div style="color: var(--color-text-tertiary); text-align: center; padding: var(--spacing-md);">${i18n.t('summary.noQuarterlyPlan')}</div>`
             }
           </div>
         </div>
@@ -1675,18 +1731,18 @@ class ExtensionUI {
     }
     
     if (!description) {
-      this.showToast('설명을 입력해주세요.', 'warning');
+      this.showToast(i18n.t('messages.descriptionRequired'), 'warning');
       return;
     }
     
     // duration 유효성 검사
     if (durationHours < 0.5) {
-      this.showToast('소요 시간은 최소 0.5시간 이상이어야 해요.', 'warning');
+      this.showToast(i18n.t('messages.durationMin'), 'warning');
       return;
     }
     
     if (durationHours > 24) {
-      this.showToast('소요 시간이 24시간을 초과할 수 없어요. 여러 일정으로 나눠서 등록해주세요.', 'warning');
+      this.showToast(i18n.t('messages.durationMax'), 'warning');
       return;
     }
     
@@ -1791,7 +1847,7 @@ class ExtensionUI {
         this.stopProgressAnimation = true;
         this.hideProgressOverlay();
         
-        this.showToast('AI 분석 중 오류 발생', 'warning');
+        this.showToast(i18n.t('messages.aiAnalysisError'), 'warning');
         
         // Add task without AI analysis
         await this.addTaskToSchedule({
@@ -1897,7 +1953,7 @@ class ExtensionUI {
       await new Promise(resolve => setTimeout(resolve, 300));
       
       // Show completion message
-      messageEl.textContent = "✅ 일정이 등록됐어요!";
+      messageEl.textContent = i18n.t('summary.scheduleRegistered');
       messageEl.classList.remove('fade-out');
       messageEl.classList.add('fade-in');
       await new Promise(resolve => setTimeout(resolve, 300));
@@ -2458,7 +2514,9 @@ class ExtensionUI {
     // Update date display
     const dateDisplay = this.shadowRoot.getElementById('current-date-display');
     if (dateDisplay) {
-      const dateStr = this.currentDate.toLocaleDateString('ko-KR', { 
+      const lang = i18n.getCurrentLanguage();
+      const locale = lang === 'ko' ? 'ko-KR' : 'en-US';
+      const dateStr = this.currentDate.toLocaleDateString(locale, { 
         year: 'numeric', 
         month: 'long', 
         day: 'numeric', 
@@ -2473,7 +2531,7 @@ class ExtensionUI {
       if (todaySchedules.length === 0) {
         scheduleList.innerHTML = `
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-tertiary);">
-            오늘 일정이 없습니다. "일정 추가" 버튼을 클릭하여 일정을 추가하세요.
+            ${i18n.t('summary.noScheduleMessage')}
           </div>
         `;
       } else {
@@ -2492,7 +2550,7 @@ class ExtensionUI {
               <strong class="schedule-item-title">${schedule.title}</strong>
             </div>
             <div class="schedule-item-actions" style="opacity: 1;">
-              <button class="btn btn-icon schedule-complete-btn ${isCompleted ? 'completed' : ''}" data-id="${scheduleId}" type="button" title="${isCompleted ? '완료됨' : '완료하기'}">
+              <button class="btn btn-icon schedule-complete-btn ${isCompleted ? 'completed' : ''}" data-id="${scheduleId}" type="button" title="${isCompleted ? i18n.t('prompts.completed') : i18n.t('prompts.completeAction')}">
                 ${isCompleted ? '✓' : '○'}
               </button>
             </div>
@@ -2537,7 +2595,7 @@ class ExtensionUI {
         await this.loadData();
         
         if (schedule.completed) {
-          this.showToast('일정을 완료했습니다.', 'success');
+          this.showToast(i18n.t('messages.scheduleCompleted'), 'success');
         }
       }
     }
@@ -2546,8 +2604,9 @@ class ExtensionUI {
   async deleteSchedule(id) {
     console.log('deleteSchedule called with id:', id);
     
-    // Show loading spinner
-    this.showScheduleLoading(true);
+    // Show progress overlay with blur
+    this.showProgressOverlay();
+    const progressPromise = this.animateProgress();
     
     const schedules = await this.storage.getSchedules();
     const dateKey = this.getLocalDateKey(this.currentDate);
@@ -2570,11 +2629,14 @@ class ExtensionUI {
         }
       }
       
+      // Wait for progress animation to complete
+      await progressPromise;
+      
       await this.loadData();
-      this.showScheduleLoading(false);
-      this.showToast('일정이 삭제되었습니다.', 'success');
+      this.hideProgressOverlay();
+      this.showToast(i18n.t('messages.scheduleDeleted'), 'success');
     } else {
-      this.showScheduleLoading(false);
+      this.hideProgressOverlay();
       console.warn('No schedules found for date');
     }
   }
@@ -2623,7 +2685,7 @@ class ExtensionUI {
 
   async generateWeeklyPlan() {
     if (!this.gemini) {
-      this.showToast('Gemini API 키를 설정해주세요.', 'warning');
+      this.showToast(i18n.t('messages.apiKeyRequired'), 'warning');
       return;
     }
 
@@ -2639,7 +2701,7 @@ class ExtensionUI {
       weeklyPlanDiv.innerHTML = `
         <div style="padding: var(--spacing-xl); text-align: center;">
           <div class="loading-spinner" style="margin: 0 auto var(--spacing-md);"></div>
-          <div style="color: var(--color-text-secondary);">주간 계획을 정리 중입니다...</div>
+          <div style="color: var(--color-text-secondary);">${i18n.t('summary.organizingWeekly')}</div>
         </div>
       `;
     }
@@ -2652,7 +2714,7 @@ class ExtensionUI {
       }
     } catch (error) {
       console.error('주간 계획 생성 실패:', error);
-      this.showToast('주간 계획 정리 중 오류가 발생했습니다.', 'error');
+      this.showToast(i18n.t('messages.weeklyPlanError'), 'error');
       if (weeklyPlanDiv) {
         weeklyPlanDiv.innerHTML = `
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
@@ -2665,7 +2727,7 @@ class ExtensionUI {
 
   async generateMonthlyPlan() {
     if (!this.gemini) {
-      this.showToast('Gemini API 키를 설정해주세요.', 'warning');
+      this.showToast(i18n.t('messages.apiKeyRequired'), 'warning');
       return;
     }
 
@@ -2679,7 +2741,7 @@ class ExtensionUI {
       monthlyPlanDiv.innerHTML = `
         <div style="padding: var(--spacing-xl); text-align: center;">
           <div class="loading-spinner" style="margin: 0 auto var(--spacing-md);"></div>
-          <div style="color: var(--color-text-secondary);">월간 계획을 생성 중입니다...</div>
+          <div style="color: var(--color-text-secondary);">${i18n.t('summary.generatingMonthly')}</div>
         </div>
       `;
     }
@@ -2692,7 +2754,7 @@ class ExtensionUI {
       }
     } catch (error) {
       console.error('월간 계획 생성 실패:', error);
-      this.showToast('월간 계획 생성 중 오류가 발생했습니다.', 'error');
+      this.showToast(i18n.t('messages.monthlyPlanError'), 'error');
       if (monthlyPlanDiv) {
         monthlyPlanDiv.innerHTML = `
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
@@ -2705,7 +2767,7 @@ class ExtensionUI {
 
   async generateQuarterlyPlan() {
     if (!this.gemini) {
-      this.showToast('Gemini API 키를 설정해주세요.', 'warning');
+      this.showToast(i18n.t('messages.apiKeyRequired'), 'warning');
       return;
     }
 
@@ -2721,7 +2783,7 @@ class ExtensionUI {
       quarterlyPlanDiv.innerHTML = `
         <div style="padding: var(--spacing-xl); text-align: center;">
           <div class="loading-spinner" style="margin: 0 auto var(--spacing-md);"></div>
-          <div style="color: var(--color-text-secondary);">분기 계획을 생성 중입니다...</div>
+          <div style="color: var(--color-text-secondary);">${i18n.t('summary.generatingQuarterly')}</div>
         </div>
       `;
     }
@@ -2734,7 +2796,7 @@ class ExtensionUI {
       }
     } catch (error) {
       console.error('분기 계획 생성 실패:', error);
-      this.showToast('분기 계획 생성 중 오류가 발생했습니다.', 'error');
+      this.showToast(i18n.t('messages.quarterlyPlanError'), 'error');
       if (quarterlyPlanDiv) {
         quarterlyPlanDiv.innerHTML = `
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
@@ -2773,14 +2835,14 @@ class ExtensionUI {
     const scheduleHtml = Object.entries(schedulesByDay).map(([day, items]) => {
       const itemsHtml = items.map(schedule => {
         // task와 title 둘 다 지원 (AI 응답 호환)
-        const displayTitle = schedule.title || schedule.task || '(제목 없음)';
+        const displayTitle = schedule.title || schedule.task || i18n.t('prompts.titleNone');
         const rawDuration = typeof schedule.duration === 'number' ? schedule.duration : parseInt(schedule.duration) || null;
         const displayDuration = rawDuration ? (rawDuration / 60).toFixed(1) : null;
         return `
         <div style="padding: var(--spacing-xs) 0; margin-left: var(--spacing-md);">
           <span style="color: var(--color-text-accent);">${schedule.time || ''}</span>
           <span style="margin-left: var(--spacing-sm);">${displayTitle}</span>
-          ${displayDuration ? `<span style="color: var(--color-text-tertiary); font-size: var(--font-size-xs);"> (${displayDuration}시간)</span>` : ''}
+          ${displayDuration ? `<span style="color: var(--color-text-tertiary); font-size: var(--font-size-xs);"> (${displayDuration}${i18n.t('prompts.hours')})</span>` : ''}
         </div>
       `;
       }).join('');
@@ -2818,14 +2880,14 @@ class ExtensionUI {
     const scheduleHtml = Object.entries(schedulesByDate).map(([date, items]) => {
       const itemsHtml = items.map(schedule => {
         // task와 title 둘 다 지원 (AI 응답 호환)
-        const displayTitle = schedule.title || schedule.task || '(제목 없음)';
+        const displayTitle = schedule.title || schedule.task || i18n.t('prompts.titleNone');
         const rawDuration = typeof schedule.duration === 'number' ? schedule.duration : parseInt(schedule.duration) || null;
         const displayDuration = rawDuration ? (rawDuration / 60).toFixed(1) : null;
         return `
         <div style="padding: var(--spacing-xs) 0; margin-left: var(--spacing-md);">
           <span style="color: var(--color-text-accent);">${schedule.time || ''}</span>
           <span style="margin-left: var(--spacing-sm);">${displayTitle}</span>
-          ${displayDuration ? `<span style="color: var(--color-text-tertiary); font-size: var(--font-size-xs);"> (${displayDuration}시간)</span>` : ''}
+          ${displayDuration ? `<span style="color: var(--color-text-tertiary); font-size: var(--font-size-xs);"> (${displayDuration}${i18n.t('prompts.hours')})</span>` : ''}
         </div>
       `;
       }).join('');
@@ -2864,7 +2926,7 @@ class ExtensionUI {
       const itemsHtml = items.map(schedule => {
         const dateStr = schedule.displayDate || schedule.date || '';
         // task와 title 둘 다 지원 (AI 응답 호환)
-        const displayTitle = schedule.title || schedule.task || '(제목 없음)';
+        const displayTitle = schedule.title || schedule.task || i18n.t('prompts.titleNone');
         const rawDuration = typeof schedule.duration === 'number' ? schedule.duration : parseInt(schedule.duration) || null;
         const displayDuration = rawDuration ? (rawDuration / 60).toFixed(1) : null;
         return `
@@ -2872,7 +2934,7 @@ class ExtensionUI {
           <span style="color: var(--color-text-tertiary); min-width: 40px; display: inline-block;">${dateStr}</span>
           <span style="color: var(--color-text-accent);">${schedule.time || ''}</span>
           <span style="margin-left: var(--spacing-sm);">${displayTitle}</span>
-          ${displayDuration ? `<span style="color: var(--color-text-tertiary); font-size: var(--font-size-xs);"> (${displayDuration}시간)</span>` : ''}
+          ${displayDuration ? `<span style="color: var(--color-text-tertiary); font-size: var(--font-size-xs);"> (${displayDuration}${i18n.t('prompts.hours')})</span>` : ''}
         </div>
       `;
       }).join('');
@@ -2948,7 +3010,7 @@ class ExtensionUI {
           await this.storage.saveSchedules(schedules);
           await this.loadData();
           this.showScheduleLoading(false);
-          this.showToast('일정이 AI 검토 후 최적화되었습니다.', 'success');
+          this.showToast(i18n.t('messages.scheduleOptimized'), 'success');
         } else {
           await this.loadData();
           this.showScheduleLoading(false);
@@ -2998,9 +3060,9 @@ class ExtensionUI {
     
     contentEl.innerHTML = `
       <div class="input-group">
-        <label class="input-label">시간</label>
+        <label class="input-label">${i18n.t('prompts.hours')}</label>
         <div class="card" style="padding: var(--spacing-md);">
-          ${timeStr} - ${endTimeStr} (${durationHours}시간)
+          ${timeStr} - ${endTimeStr} (${durationHours}${i18n.t('prompts.hours')})
         </div>
       </div>
       
@@ -3079,8 +3141,8 @@ class ExtensionUI {
     if (deleteBtn) {
       deleteBtn.addEventListener('click', () => {
         this.showConfirmModal(
-          '일정 삭제',
-          '이 일정을 삭제하시겠습니까?',
+          i18n.t('modals.deleteSchedule'),
+          i18n.t('modals.deleteConfirm'),
           () => {
             modal.classList.remove('active');
             this.deleteSchedule(schedule.id);
@@ -3098,7 +3160,7 @@ class ExtensionUI {
     
     if (!contentEl || !titleEl) return;
     
-    titleEl.textContent = '일정 수정';
+    titleEl.textContent = i18n.t('modals.editSchedule');
     
     const [hours, minutes] = schedule.time.split(':').map(Number);
     const timeValue = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
@@ -3169,9 +3231,19 @@ class ExtensionUI {
     const priority = this.shadowRoot.getElementById('edit-priority').value;
     
     if (!title) {
-      this.showToast('제목을 입력해주세요.', 'warning');
+      this.showToast(i18n.t('messages.titleRequired'), 'warning');
       return;
     }
+    
+    // Close modal first
+    const modal = this.shadowRoot.getElementById('schedule-detail-modal');
+    if (modal) {
+      modal.classList.remove('active');
+    }
+    
+    // Show progress overlay with blur
+    this.showProgressOverlay();
+    const progressPromise = this.animateProgress();
     
     const schedules = await this.storage.getSchedules();
     const dateKey = this.getLocalDateKey(this.currentDate);
@@ -3197,15 +3269,17 @@ class ExtensionUI {
           }
         }
         
-        // Close modal and reload data
-        const modal = this.shadowRoot.getElementById('schedule-detail-modal');
-        if (modal) {
-          modal.classList.remove('active');
-        }
+        // Wait for progress animation to complete
+        await progressPromise;
         
         await this.loadData();
-        this.showToast('일정이 수정되었습니다.', 'success');
+        this.hideProgressOverlay();
+        this.showToast(i18n.t('messages.scheduleUpdated'), 'success');
+      } else {
+        this.hideProgressOverlay();
       }
+    } else {
+      this.hideProgressOverlay();
     }
   }
 }

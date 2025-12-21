@@ -436,8 +436,9 @@
 }
 
 .tab {
-  padding: var(--spacing-xs) var(--spacing-sm);
-  font-size: var(--font-size-xs);
+  flex: 1;
+  padding: var(--spacing-sm) var(--spacing-md);
+  font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   color: var(--color-text-secondary);
   background: transparent;
@@ -446,7 +447,11 @@
   cursor: pointer;
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
   position: relative;
-  white-space: nowrap;
+  text-align: center;
+  word-break: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
+  min-width: 0;
 }
 
 .tab:hover {

@@ -1,0 +1,639 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Guide - dAIly Planner Chrome Extension</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #1a73e8;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+        
+        h2 {
+            color: #1a73e8;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e8f0fe;
+            font-size: 1.8em;
+        }
+        
+        h3 {
+            color: #333;
+            margin-top: 20px;
+            margin-bottom: 10px;
+            font-size: 1.3em;
+        }
+        
+        h4 {
+            color: #555;
+            margin-top: 15px;
+            margin-bottom: 8px;
+            font-size: 1.1em;
+        }
+        
+        p, li {
+            margin-bottom: 10px;
+        }
+        
+        ul {
+            margin-left: 30px;
+            margin-bottom: 15px;
+        }
+        
+        ol {
+            margin-left: 30px;
+            margin-bottom: 15px;
+        }
+        
+        .last-updated {
+            color: #666;
+            font-style: italic;
+            margin-bottom: 30px;
+            padding: 10px;
+            background: #e8f0fe;
+            border-radius: 4px;
+        }
+        
+        .section {
+            margin-bottom: 30px;
+        }
+        
+        .highlight {
+            background: #fff3cd;
+            padding: 15px;
+            border-left: 4px solid #ffc107;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        
+        .info-box {
+            background: #e8f0fe;
+            padding: 15px;
+            border-left: 4px solid #1a73e8;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        
+        .success-box {
+            background: #d4edda;
+            padding: 15px;
+            border-left: 4px solid #28a745;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        
+        .warning-box {
+            background: #fff3cd;
+            padding: 15px;
+            border-left: 4px solid #ffc107;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        
+        .danger-box {
+            background: #f8d7da;
+            padding: 15px;
+            border-left: 4px solid #dc3545;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        
+        a {
+            color: #1a73e8;
+            text-decoration: none;
+        }
+        
+        a:hover {
+            text-decoration: underline;
+        }
+        
+        .lang-switch {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .lang-btn {
+            display: inline-block;
+            padding: 10px 20px;
+            margin: 0 5px;
+            background: #1a73e8;
+            color: white;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.3s;
+            border: none;
+            font-size: 14px;
+        }
+        
+        .lang-btn:hover {
+            background: #1557b0;
+        }
+        
+        .lang-btn.active {
+            background: #0d47a1;
+        }
+        
+        .lang-content {
+            display: none;
+        }
+        
+        .lang-content.active {
+            display: block;
+        }
+        
+        .contact {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 4px;
+        }
+        
+        .footer {
+            margin-top: 50px;
+            padding-top: 20px;
+            border-top: 1px solid #ddd;
+            text-align: center;
+            color: #666;
+        }
+        
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+            
+            h2 {
+                font-size: 1.5em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Security Guide</h1>
+        <p class="last-updated"><strong>Last Updated:</strong> December 2024</p>
+        
+        <div class="lang-switch">
+            <span class="lang-btn active" onclick="switchLang('en')">English</span>
+            <span class="lang-btn" onclick="switchLang('ko')">한국어</span>
+        </div>
+        
+        <!-- English Version -->
+        <div id="en" class="lang-content active">
+            <div class="section">
+                <h2>Introduction</h2>
+                <p>This Security Guide explains how "dAIly Planner" Chrome Extension ("we", "our", or "the extension") handles your data securely and what security measures are in place to protect your information.</p>
+            </div>
+            
+            <div class="section">
+                <h2>Data Storage and Security</h2>
+                
+                <div class="success-box">
+                    <h3>✅ Local Storage Only</h3>
+                    <ul>
+                        <li>All data is stored <strong>locally on your device</strong> using Chrome's <code>chrome.storage.local</code> API</li>
+                        <li>No data is sent to our servers (we don't have any servers)</li>
+                        <li>Your data never leaves your device except when you explicitly request AI analysis</li>
+                    </ul>
+                </div>
+                
+                <h3>What Data is Stored Locally?</h3>
+                <ul>
+                    <li><strong>Schedule Data:</strong> Your daily, weekly, monthly, and quarterly schedules</li>
+                    <li><strong>User Settings:</strong> Your name, preferences, and configuration</li>
+                    <li><strong>Gemini API Key:</strong> Stored securely using Chrome's encrypted storage</li>
+                    <li><strong>Language Preference:</strong> Your selected language (Korean/English)</li>
+                </ul>
+                
+                <div class="info-box">
+                    <h4>🔒 Chrome Storage Security</h4>
+                    <p>Chrome's <code>chrome.storage.local</code> API provides:</p>
+                    <ul>
+                        <li>Encrypted storage on your device</li>
+                        <li>Isolation from other extensions</li>
+                        <li>Automatic cleanup if extension is uninstalled</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>API Key Security</h2>
+                
+                <h3>How Your API Key is Protected</h3>
+                <ul>
+                    <li><strong>Local Storage Only:</strong> Your Gemini API key is stored only on your device</li>
+                    <li><strong>No Transmission:</strong> The API key is never sent to our servers</li>
+                    <li><strong>Direct API Calls:</strong> API calls are made directly from your browser to Google's servers</li>
+                    <li><strong>Password Field:</strong> The API key input uses a password field to prevent shoulder surfing</li>
+                </ul>
+                
+                <div class="warning-box">
+                    <h4>⚠️ Important Security Notes</h4>
+                    <ul>
+                        <li>Never share your API key with anyone</li>
+                        <li>If you suspect your API key is compromised, regenerate it in Google Cloud Console</li>
+                        <li>Regularly review your API usage in Google Cloud Console</li>
+                        <li>Set API usage limits in Google Cloud Console to prevent unexpected charges</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>Data Transmission</h2>
+                
+                <h3>When Data Leaves Your Device</h3>
+                <p>Data is only transmitted in the following scenarios:</p>
+                
+                <h4>1. AI Analysis Requests</h4>
+                <ul>
+                    <li><strong>What:</strong> Schedule descriptions and context</li>
+                    <li><strong>Where:</strong> Directly to Google's Gemini API servers</li>
+                    <li><strong>When:</strong> Only when you explicitly request AI analysis or chat assistance</li>
+                    <li><strong>Encryption:</strong> All transmissions use HTTPS (TLS 1.2+)</li>
+                </ul>
+                
+                <h4>2. Chat Messages</h4>
+                <ul>
+                    <li><strong>What:</strong> Your chat messages and schedule queries</li>
+                    <li><strong>Where:</strong> Directly to Google's Gemini API servers</li>
+                    <li><strong>Storage:</strong> Chat history is stored locally, not sent to Google</li>
+                </ul>
+                
+                <div class="info-box">
+                    <h4>🔐 HTTPS Encryption</h4>
+                    <p>All API communications use HTTPS encryption, ensuring:</p>
+                    <ul>
+                        <li>Data cannot be intercepted in transit</li>
+                        <li>Server identity is verified</li>
+                        <li>Data integrity is maintained</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>Third-Party Services</h2>
+                
+                <h3>Google Gemini API</h3>
+                <ul>
+                    <li>We use Google's Gemini API for AI-powered schedule analysis and chat</li>
+                    <li>When you use AI features, data is sent to Google's servers</li>
+                    <li>Google's privacy policy applies: <a href="https://policies.google.com/privacy" target="_blank">https://policies.google.com/privacy</a></li>
+                    <li>We do not control how Google processes this data</li>
+                    <li>You can review Google's security practices: <a href="https://cloud.google.com/security" target="_blank">https://cloud.google.com/security</a></li>
+                </ul>
+                
+                <div class="highlight">
+                    <h4>💡 Best Practices</h4>
+                    <ul>
+                        <li>Review your API usage regularly in Google Cloud Console</li>
+                        <li>Set up billing alerts to monitor costs</li>
+                        <li>Use API key restrictions in Google Cloud Console</li>
+                        <li>Rotate your API key periodically</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>Permissions Explained</h2>
+                
+                <h3>Required Permissions</h3>
+                <ul>
+                    <li><strong>storage:</strong> To save your schedules and settings locally</li>
+                    <li><strong>sidePanel:</strong> To display the extension interface</li>
+                    <li><strong>activeTab:</strong> To detect text selection on web pages</li>
+                    <li><strong>scripting:</strong> To inject content scripts for text selection</li>
+                </ul>
+                
+                <h3>Host Permissions</h3>
+                <ul>
+                    <li><strong>https://generativelanguage.googleapis.com/*:</strong> To communicate with Google's Gemini API</li>
+                </ul>
+                
+                <div class="info-box">
+                    <p><strong>Note:</strong> We request only the minimum permissions necessary for the extension to function. We do not request access to your browsing history, bookmarks, or other personal data.</p>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>Data Deletion</h2>
+                
+                <h3>How to Delete Your Data</h3>
+                <ol>
+                    <li>Open the extension side panel</li>
+                    <li>Go to Settings</li>
+                    <li>Clear your API key (optional)</li>
+                    <li>Uninstall the extension from <code>chrome://extensions/</code></li>
+                </ol>
+                
+                <div class="success-box">
+                    <p><strong>✅ Complete Deletion:</strong> When you uninstall the extension, all stored data is automatically deleted from your device. Chrome's storage API ensures complete removal.</p>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>Security Best Practices</h2>
+                
+                <h3>For Users</h3>
+                <ul>
+                    <li>Keep your Chrome browser updated</li>
+                    <li>Use a strong, unique API key</li>
+                    <li>Regularly review your schedule data</li>
+                    <li>Don't share your device with untrusted users</li>
+                    <li>Monitor your Google Cloud Console for unusual API usage</li>
+                </ul>
+                
+                <h3>For Developers</h3>
+                <ul>
+                    <li>Review the source code on GitHub</li>
+                    <li>Report security vulnerabilities responsibly</li>
+                    <li>Keep the extension updated</li>
+                </ul>
+            </div>
+            
+            <div class="section">
+                <h2>Vulnerability Reporting</h2>
+                <p>If you discover a security vulnerability, please report it responsibly:</p>
+                <ul>
+                    <li>Email: <a href="mailto:lucestdail@kakao.com">lucestdail@kakao.com</a></li>
+                    <li>GitHub: <a href="https://github.com/lucestdail" target="_blank">https://github.com/lucestdail</a></li>
+                </ul>
+                <p>Please include:</p>
+                <ul>
+                    <li>Description of the vulnerability</li>
+                    <li>Steps to reproduce</li>
+                    <li>Potential impact</li>
+                    <li>Suggested fix (if any)</li>
+                </ul>
+            </div>
+            
+            <div class="contact">
+                <h2>Contact Us</h2>
+                <p>If you have any questions about security or this guide, please contact us:</p>
+                <ul>
+                    <li>Email: <a href="mailto:lucestdail@kakao.com">lucestdail@kakao.com</a></li>
+                    <li>GitHub: <a href="https://github.com/lucestdail" target="_blank">https://github.com/lucestdail</a></li>
+                </ul>
+            </div>
+        </div>
+        
+        <!-- Korean Version -->
+        <div id="ko" class="lang-content">
+            <div class="section">
+                <h2>소개</h2>
+                <p>본 보안 가이드는 "dAIly Planner" Chrome 확장 프로그램("본 확장 프로그램")이 귀하의 데이터를 안전하게 처리하는 방법과 정보를 보호하기 위한 보안 조치를 설명합니다.</p>
+            </div>
+            
+            <div class="section">
+                <h2>데이터 저장 및 보안</h2>
+                
+                <div class="success-box">
+                    <h3>✅ 로컬 저장만 사용</h3>
+                    <ul>
+                        <li>모든 데이터는 Chrome의 <code>chrome.storage.local</code> API를 사용하여 <strong>귀하의 기기에만 로컬로 저장</strong>됩니다</li>
+                        <li>자체 서버로 데이터를 전송하지 않습니다 (자체 서버가 없습니다)</li>
+                        <li>AI 분석을 명시적으로 요청할 때를 제외하고는 귀하의 데이터가 기기를 떠나지 않습니다</li>
+                    </ul>
+                </div>
+                
+                <h3>로컬에 저장되는 데이터</h3>
+                <ul>
+                    <li><strong>일정 데이터:</strong> 일간, 주간, 월간, 분기별 일정</li>
+                    <li><strong>사용자 설정:</strong> 이름, 선호도, 구성</li>
+                    <li><strong>Gemini API 키:</strong> Chrome의 암호화된 저장소를 사용하여 안전하게 저장</li>
+                    <li><strong>언어 설정:</strong> 선택한 언어 (한국어/영어)</li>
+                </ul>
+                
+                <div class="info-box">
+                    <h4>🔒 Chrome 저장소 보안</h4>
+                    <p>Chrome의 <code>chrome.storage.local</code> API는 다음을 제공합니다:</p>
+                    <ul>
+                        <li>기기에서의 암호화된 저장</li>
+                        <li>다른 확장 프로그램과의 격리</li>
+                        <li>확장 프로그램 제거 시 자동 정리</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>API 키 보안</h2>
+                
+                <h3>API 키 보호 방법</h3>
+                <ul>
+                    <li><strong>로컬 저장만:</strong> Gemini API 키는 귀하의 기기에만 저장됩니다</li>
+                    <li><strong>전송 없음:</strong> API 키는 자체 서버로 전송되지 않습니다</li>
+                    <li><strong>직접 API 호출:</strong> API 호출은 브라우저에서 Google 서버로 직접 이루어집니다</li>
+                    <li><strong>비밀번호 필드:</strong> API 키 입력은 어깨너머 시청을 방지하기 위해 비밀번호 필드를 사용합니다</li>
+                </ul>
+                
+                <div class="warning-box">
+                    <h4>⚠️ 중요한 보안 사항</h4>
+                    <ul>
+                        <li>API 키를 누구와도 공유하지 마세요</li>
+                        <li>API 키가 유출되었다고 의심되면 Google Cloud Console에서 재생성하세요</li>
+                        <li>Google Cloud Console에서 API 사용량을 정기적으로 검토하세요</li>
+                        <li>예상치 못한 요금을 방지하기 위해 Google Cloud Console에서 API 사용량 제한을 설정하세요</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>데이터 전송</h2>
+                
+                <h3>데이터가 기기를 떠나는 경우</h3>
+                <p>데이터는 다음 시나리오에서만 전송됩니다:</p>
+                
+                <h4>1. AI 분석 요청</h4>
+                <ul>
+                    <li><strong>내용:</strong> 일정 설명 및 컨텍스트</li>
+                    <li><strong>대상:</strong> Google의 Gemini API 서버로 직접</li>
+                    <li><strong>시기:</strong> AI 분석이나 채팅 지원을 명시적으로 요청할 때만</li>
+                    <li><strong>암호화:</strong> 모든 전송은 HTTPS(TLS 1.2+)를 사용합니다</li>
+                </ul>
+                
+                <h4>2. 채팅 메시지</h4>
+                <ul>
+                    <li><strong>내용:</strong> 채팅 메시지 및 일정 쿼리</li>
+                    <li><strong>대상:</strong> Google의 Gemini API 서버로 직접</li>
+                    <li><strong>저장:</strong> 채팅 기록은 로컬에 저장되며 Google로 전송되지 않습니다</li>
+                </ul>
+                
+                <div class="info-box">
+                    <h4>🔐 HTTPS 암호화</h4>
+                    <p>모든 API 통신은 HTTPS 암호화를 사용하여 다음을 보장합니다:</p>
+                    <ul>
+                        <li>전송 중 데이터 가로채기 불가능</li>
+                        <li>서버 신원 확인</li>
+                        <li>데이터 무결성 유지</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>제3자 서비스</h2>
+                
+                <h3>Google Gemini API</h3>
+                <ul>
+                    <li>AI 기반 일정 분석 및 채팅을 위해 Google의 Gemini API를 사용합니다</li>
+                    <li>AI 기능을 사용할 때 데이터가 Google 서버로 전송됩니다</li>
+                    <li>Google의 개인정보처리방침이 적용됩니다: <a href="https://policies.google.com/privacy?hl=ko" target="_blank">https://policies.google.com/privacy?hl=ko</a></li>
+                    <li>Google이 이 데이터를 처리하는 방법은 본 확장 프로그램이 통제하지 않습니다</li>
+                    <li>Google의 보안 관행을 검토할 수 있습니다: <a href="https://cloud.google.com/security" target="_blank">https://cloud.google.com/security</a></li>
+                </ul>
+                
+                <div class="highlight">
+                    <h4>💡 모범 사례</h4>
+                    <ul>
+                        <li>Google Cloud Console에서 API 사용량을 정기적으로 검토하세요</li>
+                        <li>비용 모니터링을 위한 청구 알림을 설정하세요</li>
+                        <li>Google Cloud Console에서 API 키 제한을 사용하세요</li>
+                        <li>정기적으로 API 키를 교체하세요</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>권한 설명</h2>
+                
+                <h3>필수 권한</h3>
+                <ul>
+                    <li><strong>storage:</strong> 일정 및 설정을 로컬에 저장하기 위해</li>
+                    <li><strong>sidePanel:</strong> 확장 프로그램 인터페이스를 표시하기 위해</li>
+                    <li><strong>activeTab:</strong> 웹 페이지에서 텍스트 선택을 감지하기 위해</li>
+                    <li><strong>scripting:</strong> 텍스트 선택을 위한 콘텐츠 스크립트를 주입하기 위해</li>
+                </ul>
+                
+                <h3>호스트 권한</h3>
+                <ul>
+                    <li><strong>https://generativelanguage.googleapis.com/*:</strong> Google의 Gemini API와 통신하기 위해</li>
+                </ul>
+                
+                <div class="info-box">
+                    <p><strong>참고:</strong> 확장 프로그램이 작동하는 데 필요한 최소한의 권한만 요청합니다. 브라우징 기록, 북마크 또는 기타 개인 데이터에 대한 액세스는 요청하지 않습니다.</p>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>데이터 삭제</h2>
+                
+                <h3>데이터 삭제 방법</h3>
+                <ol>
+                    <li>확장 프로그램 사이드 패널 열기</li>
+                    <li>설정으로 이동</li>
+                    <li>API 키 지우기 (선택사항)</li>
+                    <li><code>chrome://extensions/</code>에서 확장 프로그램 제거</li>
+                </ol>
+                
+                <div class="success-box">
+                    <p><strong>✅ 완전 삭제:</strong> 확장 프로그램을 제거하면 저장된 모든 데이터가 기기에서 자동으로 삭제됩니다. Chrome의 저장소 API가 완전한 제거를 보장합니다.</p>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>보안 모범 사례</h2>
+                
+                <h3>사용자를 위한</h3>
+                <ul>
+                    <li>Chrome 브라우저를 최신 상태로 유지하세요</li>
+                    <li>강력하고 고유한 API 키를 사용하세요</li>
+                    <li>일정 데이터를 정기적으로 검토하세요</li>
+                    <li>신뢰할 수 없는 사용자와 기기를 공유하지 마세요</li>
+                    <li>Google Cloud Console에서 비정상적인 API 사용량을 모니터링하세요</li>
+                </ul>
+                
+                <h3>개발자를 위한</h3>
+                <ul>
+                    <li>GitHub에서 소스 코드를 검토하세요</li>
+                    <li>보안 취약점을 책임감 있게 보고하세요</li>
+                    <li>확장 프로그램을 최신 상태로 유지하세요</li>
+                </ul>
+            </div>
+            
+            <div class="section">
+                <h2>취약점 보고</h2>
+                <p>보안 취약점을 발견한 경우 책임감 있게 보고해주세요:</p>
+                <ul>
+                    <li>이메일: <a href="mailto:lucestdail@kakao.com">lucestdail@kakao.com</a></li>
+                    <li>GitHub: <a href="https://github.com/lucestdail" target="_blank">https://github.com/lucestdail</a></li>
+                </ul>
+                <p>다음을 포함해주세요:</p>
+                <ul>
+                    <li>취약점 설명</li>
+                    <li>재현 단계</li>
+                    <li>잠재적 영향</li>
+                    <li>제안된 수정 사항 (있는 경우)</li>
+                </ul>
+            </div>
+            
+            <div class="contact">
+                <h2>문의하기</h2>
+                <p>보안 또는 본 가이드에 대한 질문이 있으시면 다음으로 연락해주세요:</p>
+                <ul>
+                    <li>이메일: <a href="mailto:lucestdail@kakao.com">lucestdail@kakao.com</a></li>
+                    <li>GitHub: <a href="https://github.com/lucestdail" target="_blank">https://github.com/lucestdail</a></li>
+                </ul>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p><strong>We respect your privacy. All data stays on your device.</strong></p>
+            <p><strong>귀하의 개인정보를 존중합니다. 모든 데이터는 귀하의 기기에 보관됩니다.</strong></p>
+        </div>
+    </div>
+    
+    <script>
+        function switchLang(lang) {
+            // Hide all language contents
+            document.querySelectorAll('.lang-content').forEach(el => {
+                el.classList.remove('active');
+            });
+            
+            // Show selected language content
+            document.getElementById(lang).classList.add('active');
+            
+            // Update button states
+            document.querySelectorAll('.lang-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+        }
+    </script>
+</body>
+</html>
+

@@ -8,14 +8,122 @@
   let selectedText = '';
   let isExtensionActive = false;
 
-  // Check if side panel is open
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'check-active') {
-      sendResponse({ active: isExtensionActive });
-    } else if (message.type === 'set-active') {
-      isExtensionActive = message.active;
+  // Helper function to check if extension context is valid
+  function isExtensionContextValid() {
+    try {
+      // If chrome.runtime.id is undefined, the extension context is invalidated
+      return chrome && chrome.runtime && chrome.runtime.id !== undefined;
+    } catch (e) {
+      return false;
     }
-  });
+  }
+
+  // Helper function to safely send message
+  function safeSendMessage(message, callback) {
+    if (!isExtensionContextValid()) {
+      console.warn('Extension context invalidated. Please reload the page.');
+      if (callback) callback(false);
+      return;
+    }
+
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        // Check for runtime errors
+        if (chrome.runtime.lastError) {
+          console.warn('Runtime error:', chrome.runtime.lastError.message);
+          if (callback) callback(false);
+          return;
+        }
+        if (callback) callback(response);
+      });
+    } catch (error) {
+      console.error('Error sending message:', error);
+      if (callback) callback(false);
+    }
+  }
+
+  // Helper function to safely use storage
+  function safeStorageSet(data, callback) {
+    if (!isExtensionContextValid()) {
+      console.warn('Extension context invalidated. Please reload the page.');
+      if (callback) callback(false);
+      return;
+    }
+
+    try {
+      chrome.storage.local.set(data, () => {
+        // Check if context is still valid after async operation
+        if (!isExtensionContextValid()) {
+          if (callback) callback(false);
+          return;
+        }
+        if (chrome.runtime.lastError) {
+          console.warn('Storage error:', chrome.runtime.lastError.message);
+          if (callback) callback(false);
+          return;
+        }
+        if (callback) callback(true);
+      });
+    } catch (error) {
+      console.error('Error setting storage:', error);
+      if (callback) callback(false);
+    }
+  }
+
+  // Helper function to safely get from storage
+  function safeStorageGet(keys, callback) {
+    if (!isExtensionContextValid()) {
+      console.warn('Extension context invalidated. Please reload the page.');
+      if (callback) callback(null);
+      return;
+    }
+
+    try {
+      chrome.storage.local.get(keys, (result) => {
+        // Check if context is still valid after async operation
+        if (!isExtensionContextValid()) {
+          if (callback) callback(null);
+          return;
+        }
+        if (chrome.runtime.lastError) {
+          console.warn('Storage error:', chrome.runtime.lastError.message);
+          if (callback) callback(null);
+          return;
+        }
+        if (callback) callback(result);
+      });
+    } catch (error) {
+      console.error('Error getting storage:', error);
+      if (callback) callback(null);
+    }
+  }
+
+  // Check if side panel is open
+  // Wrap in try-catch to handle context invalidation
+  try {
+    if (isExtensionContextValid()) {
+      chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        // Check validity inside listener as well
+        if (!isExtensionContextValid()) {
+          return false;
+        }
+        
+        try {
+          if (message.type === 'check-active') {
+            sendResponse({ active: isExtensionActive });
+          } else if (message.type === 'set-active') {
+            isExtensionActive = message.active;
+          }
+          return true; // Keep channel open for async response
+        } catch (e) {
+          console.warn('Error in message listener:', e);
+          return false;
+        }
+      });
+    }
+  } catch (e) {
+    console.warn('Failed to register message listener:', e);
+  }
 
   // Listen for text selection with delay to ensure selection is complete
   let selectionTimeout;
@@ -47,11 +155,20 @@
     // Remove existing button if any
     hideAddTaskButton();
 
+    // Check if extension context is valid before proceeding
+    if (!isExtensionContextValid()) {
+      console.warn('Extension context invalidated. Cannot show add task button.');
+      return;
+    }
+
     // Get selection range
     const range = selection.getRangeAt(0);
     const rect = range.getBoundingClientRect();
 
-    // Create floating button
+    // Get language from storage or detect from browser
+    let buttonText = '할 일로 추가'; // Default Korean
+    
+    // Create floating button first
     const button = document.createElement('div');
     button.id = 'daily-planner-add-btn';
     button.innerHTML = `
@@ -60,8 +177,39 @@
         <line x1="12" y1="8" x2="12" y2="16"></line>
         <line x1="8" y1="12" x2="16" y2="12"></line>
       </svg>
-      <span>할 일로 추가</span>
+      <span>${buttonText}</span>
     `;
+    
+    // Helper function to update button text
+    function updateButtonText(text) {
+      try {
+        const span = button.querySelector('span');
+        if (span && button.parentNode) {
+          span.textContent = text;
+        }
+      } catch (e) {
+        // Button may have been removed, ignore
+      }
+    }
+    
+    // Try to get language from storage safely
+    safeStorageGet(['language', 'settings'], (result) => {
+      if (!isExtensionContextValid()) {
+        // Context invalidated, don't update
+        return;
+      }
+      
+      if (result) {
+        const lang = result.settings?.language || result.language || (navigator.language.startsWith('ko') ? 'ko' : 'en');
+        buttonText = lang === 'en' ? 'Add as Task' : '할 일로 추가';
+        updateButtonText(buttonText);
+      } else {
+        // Fallback to browser language
+        const lang = navigator.language.startsWith('ko') ? 'ko' : 'en';
+        buttonText = lang === 'en' ? 'Add as Task' : '할 일로 추가';
+        updateButtonText(buttonText);
+      }
+    });
     
     // Style the button
     Object.assign(button.style, {
@@ -105,17 +253,56 @@
       e.stopPropagation();
       e.stopImmediatePropagation();
       
-      // Store selected text in storage for side panel to read
-      chrome.storage.local.set({
-        selectedText: selectedText,
-        selectedTextUrl: window.location.href,
-        selectedTextTitle: document.title
-      }).then(() => {
-        // Also try to open side panel
-        chrome.runtime.sendMessage({
-          type: 'open-side-panel'
-        }).catch(() => {
-          // Ignore errors - side panel might already be open
+      // Check if extension context is still valid
+      if (!isExtensionContextValid()) {
+        console.warn('Extension context invalidated. Please reload the page.');
+        hideAddTaskButton();
+        if (selection.rangeCount > 0) {
+          selection.removeAllRanges();
+        }
+        return;
+      }
+
+      // Get current language from storage
+      const getLanguage = (callback) => {
+        safeStorageGet(['language', 'settings'], (result) => {
+          if (result) {
+            const lang = result.settings?.language || result.language || (navigator.language.startsWith('ko') ? 'ko' : 'en');
+            callback(lang);
+          } else {
+            callback(navigator.language.startsWith('ko') ? 'ko' : 'en');
+          }
+        });
+      };
+
+      // Store selected text and open side panel
+      getLanguage((lang) => {
+        // Store selected text in storage for side panel to read
+        safeStorageSet({
+          selectedText: selectedText,
+          selectedTextUrl: window.location.href,
+          selectedTextTitle: document.title,
+          language: lang
+        }, (success) => {
+          if (success) {
+            // Send message to background script to open side panel
+            safeSendMessage({
+              type: 'open-side-panel-with-text',
+              selectedText: selectedText,
+              selectedTextUrl: window.location.href,
+              selectedTextTitle: document.title,
+              language: lang
+            });
+          } else {
+            // Fallback: try sending message directly with data
+            safeSendMessage({
+              type: 'open-side-panel-with-text',
+              selectedText: selectedText,
+              selectedTextUrl: window.location.href,
+              selectedTextTitle: document.title,
+              language: lang
+            });
+          }
         });
       });
 
