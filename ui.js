@@ -12,13 +12,16 @@ class ExtensionUI {
     this.shadowRoot = null;
     this.storage = new StorageManager();
     this.gemini = null;
-    this.currentView = 'daily'; // daily, weekly, monthly, yearly
+    this.currentView = 'daily'; // daily, weekly, monthly, quarterly, summary
     this.selectedText = null;
     this.draggedItem = null;
     this.currentDate = new Date(); // Current date for navigation
     this.currentWeekStart = null;
     this.currentMonth = null;
-    this.currentYear = null;
+    this.currentQuarter = null; // 1, 2, 3, 4
+    this.currentQuarterYear = null;
+    this.chatMessages = []; // 채팅 메시지 히스토리
+    this.isChatLoading = false; // 채팅 로딩 상태
     
     this.init();
   }
@@ -119,7 +122,9 @@ class ExtensionUI {
         <button class="tab active" data-view="daily">일간</button>
         <button class="tab" data-view="weekly">주간</button>
         <button class="tab" data-view="monthly">월간</button>
-        <button class="tab" data-view="yearly">연간</button>
+        <button class="tab" data-view="quarterly">분기</button>
+        <button class="tab" data-view="summary">종합</button>
+        <button class="tab" data-view="chat">문의</button>
       </div>
       
       <div class="content" id="content-area">
@@ -149,10 +154,58 @@ class ExtensionUI {
           </div>
         </div>
       </div>
+      
+      <div class="progress-overlay" id="progress-overlay">
+        <div class="progress-content">
+          <div class="progress-spinner"></div>
+          <div class="progress-message-container">
+            <div class="progress-message" id="progress-message">일정을 분석하고 있습니다...</div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="modal-overlay" id="confirm-modal">
+        <div class="modal" style="max-width: 320px;">
+          <div class="modal-header">
+            <h2 class="modal-title" id="confirm-modal-title">확인</h2>
+          </div>
+          <div class="modal-content">
+            <p id="confirm-modal-message" style="margin-bottom: var(--spacing-lg); color: var(--color-text-secondary);"></p>
+            <div style="display: flex; gap: var(--spacing-md);">
+              <button class="btn" id="confirm-cancel-btn" style="flex: 1;">취소</button>
+              <button class="btn" id="confirm-ok-btn" style="flex: 1; background: var(--color-error); color: white;">삭제</button>
+            </div>
+          </div>
+        </div>
+      </div>
     `;
     
     this.shadowRoot.appendChild(container);
     this.root = container;
+  }
+
+  getProgressMessages() {
+    return [
+      "📋 일정을 확인하고 있어요",
+      "🔍 꼼꼼히 살펴보는 중이에요",
+      "📊 오늘 일정과 비교해볼게요",
+      "⏰ 최적 시간대를 찾고 있어요",
+      "✍️ 메모를 정리하고 있어요",
+      "📤 주간 계획에 반영할게요",
+      "📅 이번 주 일정을 보고 있어요",
+      "🤔 업무 균형을 맞춰볼게요",
+      "📝 주간 계획을 조율하는 중이에요",
+      "✅ 주간 검토 거의 끝났어요",
+      "📈 월간 목표랑 비교해볼게요",
+      "🎯 우선순위를 조정하고 있어요",
+      "💼 리소스 배분을 확인해요",
+      "📊 분기 계획도 업데이트해요",
+      "🏆 분기 목표를 확인하고 있어요",
+      "🤝 최종 계획을 정리하는 중이에요",
+      "📋 마무리 작업 중이에요",
+      "✨ 거의 다 됐어요!",
+      "🎉 완료됐어요!"
+    ];
   }
 
   renderDailyView() {
@@ -198,9 +251,19 @@ class ExtensionUI {
 
   renderWeeklyView() {
     const today = new Date();
-    const weekStart = new Date(today);
-    weekStart.setDate(today.getDate() - today.getDay());
-    const weekStr = `${weekStart.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })} ~ ${new Date(weekStart.getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })}`;
+    const weekStart = this.currentWeekStart || (() => {
+      const start = new Date(today);
+      start.setDate(today.getDate() - today.getDay());
+      return start;
+    })();
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    
+    // Calculate week number in month
+    const monthName = weekStart.toLocaleDateString('ko-KR', { month: 'long' });
+    const weekOfMonth = Math.ceil((weekStart.getDate() + new Date(weekStart.getFullYear(), weekStart.getMonth(), 1).getDay()) / 7);
+    const weekTitle = `${monthName} ${weekOfMonth}주차`;
+    const dateRange = `${weekStart.getMonth() + 1}/${weekStart.getDate()} ~ ${weekEnd.getMonth() + 1}/${weekEnd.getDate()}`;
     
     return `
       <div class="card">
@@ -209,15 +272,17 @@ class ExtensionUI {
             <button class="btn btn-icon" id="prev-week-btn" title="이전 주">←</button>
             <div>
               <h2 class="card-title">주간 업무 계획</h2>
-              <div style="font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-top: var(--spacing-xs);" id="current-week-display">${weekStr}</div>
+              <div id="current-week-display" style="margin-top: var(--spacing-xs);">
+                <div style="font-size: var(--font-size-sm); color: var(--color-text-secondary);">${weekTitle}</div>
+                <div style="font-size: var(--font-size-xs); color: var(--color-text-tertiary); font-style: italic;">${dateRange}</div>
+              </div>
             </div>
             <button class="btn btn-icon" id="next-week-btn" title="다음 주">→</button>
           </div>
-          <button class="btn btn-primary" id="generate-weekly-plan">주간 계획 정리</button>
         </div>
         <div class="weekly-plan" id="weekly-plan">
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
-            주간 계획을 생성하려면 "주간 계획 생성" 버튼을 클릭하세요.
+            아직 주간 계획이 없어요. 일정을 등록하면 자동으로 만들어드릴게요!
           </div>
         </div>
       </div>
@@ -225,7 +290,7 @@ class ExtensionUI {
   }
 
   renderMonthlyView() {
-    const today = new Date();
+    const today = this.currentMonth || new Date();
     const monthStr = today.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long' });
     
     return `
@@ -239,74 +304,211 @@ class ExtensionUI {
             </div>
             <button class="btn btn-icon" id="next-month-btn" title="다음 달">→</button>
           </div>
-          <button class="btn btn-primary" id="generate-monthly-plan">월간 계획 정리</button>
         </div>
         <div class="monthly-plan" id="monthly-plan">
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
-            월간 계획을 생성하려면 "월간 계획 생성" 버튼을 클릭하세요.
+            아직 월간 계획이 없어요. 일정을 등록하면 자동으로 만들어드릴게요!
           </div>
         </div>
       </div>
     `;
   }
 
-  renderYearlyView() {
+  renderQuarterlyView() {
     const today = new Date();
-    const yearStr = today.getFullYear() + '년';
+    const currentQuarter = this.currentQuarter || Math.ceil((today.getMonth() + 1) / 3);
+    const currentYear = this.currentQuarterYear || today.getFullYear();
+    const quarterStr = `${currentYear}년 ${currentQuarter}분기`;
+    
+    // Calculate quarter date range
+    const quarterStartMonth = (currentQuarter - 1) * 3;
+    const quarterEndMonth = quarterStartMonth + 2;
+    const monthNames = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
+    const dateRange = `${monthNames[quarterStartMonth]} ~ ${monthNames[quarterEndMonth]}`;
     
     return `
       <div class="card">
         <div class="card-header">
           <div style="display: flex; align-items: center; gap: var(--spacing-md); flex: 1;">
-            <button class="btn btn-icon" id="prev-year-btn" title="이전 년">←</button>
+            <button class="btn btn-icon" id="prev-quarter-btn" title="이전 분기">←</button>
             <div>
-              <h2 class="card-title">연간 계획</h2>
-              <div style="font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-top: var(--spacing-xs);" id="current-year-display">${yearStr}</div>
+              <h2 class="card-title">분기 업무 계획</h2>
+              <div id="current-quarter-display" style="margin-top: var(--spacing-xs);">
+                <div style="font-size: var(--font-size-sm); color: var(--color-text-secondary);">${quarterStr}</div>
+                <div style="font-size: var(--font-size-xs); color: var(--color-text-tertiary); font-style: italic;">${dateRange}</div>
+              </div>
             </div>
-            <button class="btn btn-icon" id="next-year-btn" title="다음 년">→</button>
+            <button class="btn btn-icon" id="next-quarter-btn" title="다음 분기">→</button>
           </div>
-          <button class="btn btn-primary" id="generate-yearly-plan">연간 계획 정리</button>
         </div>
-        <div class="yearly-plan" id="yearly-plan">
+        <div class="quarterly-plan" id="quarterly-plan">
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
-            연간 계획을 생성하려면 "연간 계획 생성" 버튼을 클릭하세요.
+            아직 분기 계획이 없어요. 일정을 등록하면 자동으로 만들어드릴게요!
           </div>
         </div>
       </div>
     `;
   }
 
+  renderSummaryView() {
+    const today = new Date();
+    const dateStr = today.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' });
+    
+    return `
+      <div class="card">
+        <div class="card-header">
+          <div>
+            <h2 class="card-title">종합 계획</h2>
+            <div style="font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-top: var(--spacing-xs);">${dateStr}</div>
+          </div>
+        </div>
+        <div class="summary-content" id="summary-content">
+          <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
+            데이터를 불러오는 중...
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderChatView() {
+    return `
+      <div class="chat-container">
+        <div class="chat-header">
+          <div class="chat-header-icon">💬</div>
+          <div class="chat-header-content">
+            <h2 class="chat-header-title">일정 도우미</h2>
+            <p class="chat-header-subtitle">일정에 대해 무엇이든 물어보세요</p>
+          </div>
+        </div>
+        
+        <div class="chat-messages" id="chat-messages">
+          ${this.renderChatMessages()}
+        </div>
+        
+        <div class="chat-input-container">
+          <div class="chat-input-wrapper">
+            <textarea 
+              class="chat-input" 
+              id="chat-input" 
+              placeholder="일정에 대해 질문해주세요."
+              rows="1"
+            ></textarea>
+            <button class="chat-send-btn" id="chat-send-btn" title="전송">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+            </button>
+          </div>
+          <div class="chat-input-hint">
+            Enter로 전송 • Shift+Enter로 줄바꿈
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderChatMessages() {
+    if (this.chatMessages.length === 0) {
+      return `
+        <div class="chat-welcome">
+          <div class="chat-welcome-icon">🤖</div>
+          <h3 class="chat-welcome-title">안녕하세요! 일정 도우미예요</h3>
+          <p class="chat-welcome-text">
+            일정에 대해 궁금한 점이 있으시면 편하게 물어봐 주세요.
+            오늘, 이번 주, 이번 달 일정을 확인하고 조언해 드릴게요.
+          </p>
+          <div class="chat-suggestions">
+            <button class="chat-suggestion-btn" data-suggestion="오늘 일정 알려줘">📅 오늘 일정 알려줘</button>
+            <button class="chat-suggestion-btn" data-suggestion="이번 주에 바쁜 날은 언제야?">📊 이번 주에 바쁜 날은?</button>
+            <button class="chat-suggestion-btn" data-suggestion="시간 관리 팁 좀 줘">💡 시간 관리 팁</button>
+            <button class="chat-suggestion-btn" data-suggestion="이번 달 일정 요약해줘">📆 이번 달 일정 요약</button>
+          </div>
+        </div>
+      `;
+    }
+
+    return this.chatMessages.map((msg, index) => {
+      if (msg.role === 'user') {
+        return `
+          <div class="chat-message chat-message-user" data-index="${index}">
+            <div class="chat-message-content">
+              <div class="chat-message-text">${this.escapeHtml(msg.content)}</div>
+              <div class="chat-message-time">${msg.time}</div>
+            </div>
+            <div class="chat-message-avatar chat-avatar-user">👤</div>
+          </div>
+        `;
+      } else {
+        return `
+          <div class="chat-message chat-message-assistant" data-index="${index}">
+            <div class="chat-message-avatar chat-avatar-assistant">🤖</div>
+            <div class="chat-message-content">
+              <div class="chat-message-text">${this.formatChatResponse(msg.content)}</div>
+              <div class="chat-message-time">${msg.time}</div>
+            </div>
+          </div>
+        `;
+      }
+    }).join('');
+  }
+
+  formatChatResponse(text) {
+    // 마크다운 스타일 포맷팅
+    let formatted = this.escapeHtml(text);
+    
+    // 줄바꿈 처리
+    formatted = formatted.replace(/\n/g, '<br>');
+    
+    // 볼드 처리 (**text**)
+    formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    
+    // 리스트 항목 처리 (- item)
+    formatted = formatted.replace(/^- (.+)$/gm, '<span class="chat-list-item">• $1</span>');
+    
+    return formatted;
+  }
+
+  escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
   renderSettingsForm() {
     return `
       <form id="settings-form">
-        <div class="input-group">
-          <label class="input-label">이름</label>
-          <input type="text" class="input" id="setting-name" placeholder="이름을 입력하세요">
+        <div style="display: flex; gap: var(--spacing-md);">
+          <div class="input-group" style="flex: 1;">
+            <label class="input-label">이름</label>
+            <input type="text" class="input" id="setting-name" placeholder="이름">
+          </div>
+          <div class="input-group" style="flex: 1;">
+            <label class="input-label">생년월일</label>
+            <input type="date" class="input" id="setting-birthdate">
+          </div>
         </div>
         
-        <div class="input-group">
-          <label class="input-label">생년월일</label>
-          <input type="date" class="input" id="setting-birthdate">
-        </div>
-        
-        <div class="input-group">
-          <label class="input-label">성별</label>
-          <select class="input" id="setting-gender">
-            <option value="">선택하세요</option>
-            <option value="male">남성</option>
-            <option value="female">여성</option>
-            <option value="other">기타</option>
-          </select>
-        </div>
-        
-        <div class="input-group">
-          <label class="input-label">직업</label>
-          <input type="text" class="input" id="setting-job" placeholder="직업을 입력하세요">
+        <div style="display: flex; gap: var(--spacing-md);">
+          <div class="input-group" style="flex: 1;">
+            <label class="input-label">성별</label>
+            <select class="input" id="setting-gender">
+              <option value="">선택</option>
+              <option value="male">남성</option>
+              <option value="female">여성</option>
+              <option value="other">기타</option>
+            </select>
+          </div>
+          <div class="input-group" style="flex: 1;">
+            <label class="input-label">직업</label>
+            <input type="text" class="input" id="setting-job" placeholder="직업">
+          </div>
         </div>
         
         <div class="input-group">
           <label class="input-label">성향</label>
-          <textarea class="input input-textarea" id="setting-personality" placeholder="당신의 성향, 업무 스타일 등을 입력하세요"></textarea>
+          <textarea class="input input-textarea" id="setting-personality" placeholder="당신의 성향, 업무 스타일 등을 입력하세요" style="min-height: 60px;"></textarea>
         </div>
         
         <div class="input-group">
@@ -340,39 +542,45 @@ class ExtensionUI {
   }
 
   renderAddTaskForm() {
-    return `
-      <form id="add-task-form">
-        <div class="input-group">
+    const selectedTextSection = this.selectedText ? `
+        <div class="input-group" id="selected-text-group">
           <label class="input-label">선택한 텍스트</label>
           <div class="card" style="padding: var(--spacing-md); background: var(--color-bg-elevated);">
             <div id="selected-text-preview" style="color: var(--color-text-secondary); font-style: italic;">
-              ${this.selectedText || '텍스트가 선택되지 않았습니다.'}
+              ${this.selectedText}
             </div>
           </div>
         </div>
+    ` : '';
+
+    return `
+      <form id="add-task-form">
+        ${selectedTextSection}
         
         <div class="input-group">
           <label class="input-label">할 일 제목</label>
           <input type="text" class="input" id="task-title" placeholder="할 일 제목을 입력하세요" required>
         </div>
         
-          <div class="input-group">
-            <label class="input-label">설명 및 계획 범위</label>
-            <textarea class="input input-textarea" id="task-description" placeholder="예시: 약 3시간 소요 예정, 회의실 A에서 진행, 오피스에서 출발, 오후 3시경 종료 예상&#10;&#10;이 일정의 범위를 선택해주세요:&#10;- 일간: 오늘 하루만의 일정&#10;- 주간: 이번 주에 걸친 일정 (예: 월~금 프로젝트)&#10;- 월간: 이번 달에 걸친 일정 (예: 12월 15일~18일 출장)&#10;- 연간: 올해 또는 내년에 걸친 장기 일정 (예: 내년 1월~3월 로드쇼)&#10;&#10;위 정보를 바탕으로 상세하게 작성해주세요."></textarea>
-          </div>
-        
         <div class="input-group">
-          <label class="input-label">우선순위</label>
-          <select class="input" id="task-priority">
-            <option value="low">낮음</option>
-            <option value="medium" selected>보통</option>
-            <option value="high">높음</option>
-          </select>
+          <label class="input-label">설명</label>
+          <textarea class="input input-textarea" id="task-description" style="min-height: 150px;" placeholder="일정에 대한 상세 설명을 입력하세요.&#10;&#10;예시:&#10;- 약 3시간 소요 예정&#10;- 회의실 A에서 진행&#10;- 오후 3시경 종료 예상&#10;- 12월 15일~18일 출장"></textarea>
         </div>
         
-        <div class="input-group">
-          <label class="input-label">예상 소요 시간</label>
-          <input type="number" class="input" id="task-duration" placeholder="분 단위" min="1">
+        <div style="display: flex; gap: var(--spacing-md);">
+          <div class="input-group" style="flex: 1;">
+            <label class="input-label">우선순위</label>
+            <select class="input" id="task-priority">
+              <option value="low">낮음</option>
+              <option value="medium" selected>보통</option>
+              <option value="high">높음</option>
+            </select>
+          </div>
+          
+          <div class="input-group" style="flex: 1;">
+            <label class="input-label">예상 소요 시간</label>
+            <input type="number" class="input" id="task-duration" placeholder="시간 단위 (예: 1.5)" min="0.5" step="0.5">
+          </div>
         </div>
         
         <button type="submit" class="btn btn-primary" id="submit-task-btn" style="width: 100%; margin-top: var(--spacing-lg);">
@@ -386,17 +594,17 @@ class ExtensionUI {
   setupEventListeners() {
     console.log('Setting up event listeners...');
     
-    // Use event delegation for dynamically created elements (like delete buttons)
+    // Use event delegation for dynamically created elements (like complete buttons)
     this.shadowRoot.addEventListener('click', (e) => {
-      // Handle delete schedule button clicks
-      const deleteBtn = e.target.closest('.schedule-delete-btn');
-      if (deleteBtn) {
+      // Handle complete schedule button clicks
+      const completeBtn = e.target.closest('.schedule-complete-btn');
+      if (completeBtn) {
         e.preventDefault();
         e.stopPropagation();
-        const id = deleteBtn.dataset.id;
-        console.log('Delete button clicked, id:', id);
+        const id = completeBtn.dataset.id;
+        console.log('Complete button clicked, id:', id);
         if (id) {
-          this.deleteSchedule(id);
+          this.toggleScheduleComplete(id);
         }
         return;
       }
@@ -464,20 +672,29 @@ class ExtensionUI {
         return;
       }
       
-      // Handle year navigation
-      const prevYearBtn = e.target.closest('#prev-year-btn');
-      if (prevYearBtn) {
+      // Handle quarter navigation
+      const prevQuarterBtn = e.target.closest('#prev-quarter-btn');
+      if (prevQuarterBtn) {
         e.preventDefault();
         e.stopPropagation();
-        this.navigateYear(-1);
+        this.navigateQuarter(-1);
         return;
       }
       
-      const nextYearBtn = e.target.closest('#next-year-btn');
-      if (nextYearBtn) {
+      const nextQuarterBtn = e.target.closest('#next-quarter-btn');
+      if (nextQuarterBtn) {
         e.preventDefault();
         e.stopPropagation();
-        this.navigateYear(1);
+        this.navigateQuarter(1);
+        return;
+      }
+      
+      // Handle refresh summary
+      const refreshSummaryBtn = e.target.closest('#refresh-summary');
+      if (refreshSummaryBtn) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.loadSummaryData();
         return;
       }
     });
@@ -625,48 +842,10 @@ class ExtensionUI {
       console.warn('Add task form not found');
     }
 
-    // Generate plan buttons (will be set up when views are switched)
-    this.setupPlanGenerationButtons();
-
     // Drag and drop for schedule items
     this.setupDragAndDrop();
     
     console.log('Event listeners setup complete');
-  }
-
-  setupPlanGenerationButtons() {
-    // Generate weekly plan
-    const generateWeeklyBtn = this.shadowRoot.getElementById('generate-weekly-plan');
-    if (generateWeeklyBtn) {
-      generateWeeklyBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        console.log('Generate weekly plan clicked');
-        this.generateWeeklyPlan();
-      });
-    }
-
-    // Generate monthly plan
-    const generateMonthlyBtn = this.shadowRoot.getElementById('generate-monthly-plan');
-    if (generateMonthlyBtn) {
-      generateMonthlyBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        console.log('Generate monthly plan clicked');
-        this.generateMonthlyPlan();
-      });
-    }
-
-    // Generate yearly plan
-    const generateYearlyBtn = this.shadowRoot.getElementById('generate-yearly-plan');
-    if (generateYearlyBtn) {
-      generateYearlyBtn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        console.log('Generate yearly plan clicked');
-        this.generateYearlyPlan();
-      });
-    }
   }
 
   setupDragAndDrop() {
@@ -736,30 +915,45 @@ class ExtensionUI {
       tab.classList.toggle('active', tab.dataset.view === view);
     });
     
-    // Update content
+    // Update content with fade transition
     const contentArea = this.shadowRoot.getElementById('content-area');
     if (!contentArea) {
       console.error('Content area not found');
       return;
     }
     
-    switch(view) {
-      case 'daily':
-        contentArea.innerHTML = this.renderDailyView();
-        break;
-      case 'weekly':
-        contentArea.innerHTML = this.renderWeeklyView();
-        break;
-      case 'monthly':
-        contentArea.innerHTML = this.renderMonthlyView();
-        break;
-      case 'yearly':
-        contentArea.innerHTML = this.renderYearlyView();
-        break;
-    }
+    // Fade out current content
+    contentArea.style.opacity = '0';
+    contentArea.style.transform = 'translateY(8px)';
     
-    // Wait for DOM update, then setup event listeners and load data
     setTimeout(() => {
+      switch(view) {
+        case 'daily':
+          contentArea.innerHTML = this.renderDailyView();
+          break;
+        case 'weekly':
+          contentArea.innerHTML = this.renderWeeklyView();
+          break;
+        case 'monthly':
+          contentArea.innerHTML = this.renderMonthlyView();
+          break;
+        case 'quarterly':
+          contentArea.innerHTML = this.renderQuarterlyView();
+          break;
+        case 'summary':
+          contentArea.innerHTML = this.renderSummaryView();
+          break;
+        case 'chat':
+          contentArea.innerHTML = this.renderChatView();
+          break;
+      }
+      
+      // Fade in new content
+      requestAnimationFrame(() => {
+        contentArea.style.opacity = '1';
+        contentArea.style.transform = 'translateY(0)';
+      });
+      
       // Re-setup event listeners for new content
       const addScheduleBtn = this.shadowRoot.getElementById('add-schedule-btn');
       if (addScheduleBtn) {
@@ -770,9 +964,6 @@ class ExtensionUI {
         });
       }
       
-      // Setup plan generation buttons
-      this.setupPlanGenerationButtons();
-      
       // Load data based on view
       if (view === 'daily') {
         this.loadData();
@@ -780,10 +971,14 @@ class ExtensionUI {
         this.loadWeeklyData();
       } else if (view === 'monthly') {
         this.loadMonthlyData();
-      } else if (view === 'yearly') {
-        this.loadYearlyData();
+      } else if (view === 'quarterly') {
+        this.loadQuarterlyData();
+      } else if (view === 'summary') {
+        this.loadSummaryData();
+      } else if (view === 'chat') {
+        this.setupChatEventListeners();
       }
-    }, 50);
+    }, 150);
   }
 
   async loadSettingsForm() {
@@ -827,17 +1022,27 @@ class ExtensionUI {
     // Close modal
     this.shadowRoot.getElementById('settings-modal').classList.remove('active');
     
-    // Show success message (you can add a toast notification here)
-    alert('설정이 저장되었습니다.');
+    // Show success toast
+    this.showToast('설정이 저장되었습니다.', 'success');
   }
 
   showAddTaskModal(selectedText = null) {
     this.selectedText = selectedText;
     const modal = this.shadowRoot.getElementById('add-task-modal');
-    const preview = this.shadowRoot.getElementById('selected-text-preview');
+    const addTaskContent = this.shadowRoot.getElementById('add-task-content');
     
-    if (preview) {
-      preview.textContent = selectedText || '텍스트가 선택되지 않았습니다.';
+    // Re-render the form to show/hide selected text section
+    if (addTaskContent) {
+      addTaskContent.innerHTML = this.renderAddTaskForm();
+      
+      // Re-attach form submit listener
+      const addTaskForm = this.shadowRoot.getElementById('add-task-form');
+      if (addTaskForm) {
+        addTaskForm.addEventListener('submit', (e) => {
+          e.preventDefault();
+          this.processAddTask();
+        });
+      }
     }
     
     modal.classList.add('active');
@@ -877,12 +1082,26 @@ class ExtensionUI {
     }
   }
 
-  navigateYear(years) {
-    if (this.currentView === 'yearly') {
-      const currentYear = this.currentYear || new Date();
-      const newYear = new Date(currentYear.getFullYear() + years, 0, 1);
-      this.currentYear = newYear;
-      this.loadYearlyData();
+  navigateQuarter(quarters) {
+    if (this.currentView === 'quarterly') {
+      const today = new Date();
+      let currentQuarter = this.currentQuarter || Math.ceil((today.getMonth() + 1) / 3);
+      let currentYear = this.currentQuarterYear || today.getFullYear();
+      
+      currentQuarter += quarters;
+      
+      // Handle year change
+      if (currentQuarter > 4) {
+        currentQuarter = 1;
+        currentYear++;
+      } else if (currentQuarter < 1) {
+        currentQuarter = 4;
+        currentYear--;
+      }
+      
+      this.currentQuarter = currentQuarter;
+      this.currentQuarterYear = currentYear;
+      this.loadQuarterlyData();
     }
   }
 
@@ -892,52 +1111,123 @@ class ExtensionUI {
       const today = new Date();
       const start = new Date(today);
       start.setDate(today.getDate() - today.getDay());
+      start.setHours(0, 0, 0, 0);
       return start;
     })();
     const weekKey = `${weekStart.getFullYear()}-W${this.getWeekNumber(weekStart)}`;
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
     
     const weeklyPlans = await chrome.storage.local.get('weeklyPlans') || {};
     const planData = weeklyPlans.weeklyPlans?.[weekKey];
     
-    if (planData) {
+    // Always load daily schedules for the week
+    const schedules = await this.storage.getSchedules();
+    const weekSchedules = [];
+    
+    // Loop through 7 days of the week
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(weekStart);
+      d.setDate(weekStart.getDate() + i);
+      // Use local date format for dateKey
+      const dateKey = this.getLocalDateKey(d);
+      if (schedules[dateKey] && Array.isArray(schedules[dateKey])) {
+        const dayName = d.toLocaleDateString('ko-KR', { weekday: 'short' });
+        const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
+        schedules[dateKey].forEach(s => {
+          weekSchedules.push({
+            ...s,
+            date: dateKey,
+            day: `${dayName} (${dateStr})`
+          });
+        });
+      }
+    }
+    
+    const weeklyPlanDiv = this.shadowRoot.getElementById('weekly-plan');
+    
+    if (planData && planData.summary) {
       this.renderWeeklyPlanData(planData);
+    } else if (weekSchedules.length > 0) {
+      // Show daily schedules if no AI summary yet
+      this.renderWeeklyPlanData({
+        schedules: weekSchedules,
+        summary: `이번 주에 ${weekSchedules.length}개의 일정이 있어요.`
+      });
     } else {
-      const weeklyPlanDiv = this.shadowRoot.getElementById('weekly-plan');
       if (weeklyPlanDiv) {
         weeklyPlanDiv.innerHTML = `
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
-            주간 계획을 생성하려면 "주간 계획 생성" 버튼을 클릭하세요.
+            아직 이번 주 일정이 없어요. 일정을 등록해보세요!
           </div>
         `;
       }
     }
     
-    // Update week display
+    // Update week display with "12월 1주차" format
     const weekDisplay = this.shadowRoot.getElementById('current-week-display');
     if (weekDisplay) {
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekStart.getDate() + 6);
-      const weekStr = `${weekStart.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })} ~ ${weekEnd.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric' })}`;
-      weekDisplay.textContent = weekStr;
+      // Calculate week number in month
+      const monthName = weekStart.toLocaleDateString('ko-KR', { month: 'long' });
+      const weekOfMonth = Math.ceil((weekStart.getDate() + new Date(weekStart.getFullYear(), weekStart.getMonth(), 1).getDay()) / 7);
+      const weekTitle = `${monthName} ${weekOfMonth}주차`;
+      const dateRange = `${weekStart.getMonth() + 1}/${weekStart.getDate()} ~ ${weekEnd.getMonth() + 1}/${weekEnd.getDate()}`;
+      
+      weekDisplay.innerHTML = `
+        <div style="font-size: var(--font-size-sm); color: var(--color-text-secondary);">${weekTitle}</div>
+        <div style="font-size: var(--font-size-xs); color: var(--color-text-tertiary); font-style: italic;">${dateRange}</div>
+      `;
     }
   }
 
   async loadMonthlyData() {
     // Load monthly plan data
     const today = this.currentMonth || new Date();
-    const monthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const year = today.getFullYear();
+    const month = today.getMonth();
+    const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
     
     const monthlyPlans = await chrome.storage.local.get('monthlyPlans') || {};
     const planData = monthlyPlans.monthlyPlans?.[monthKey];
     
-    if (planData) {
+    // Load daily schedules for the month
+    const schedules = await this.storage.getSchedules();
+    const monthSchedules = [];
+    const monthStart = new Date(year, month, 1);
+    const monthEnd = new Date(year, month + 1, 0);
+    
+    // 월의 일수 계산 후 순회
+    const daysInMonth = monthEnd.getDate();
+    for (let i = 1; i <= daysInMonth; i++) {
+      const d = new Date(year, month, i);
+      const dateKey = this.getLocalDateKey(d);
+      if (schedules[dateKey] && Array.isArray(schedules[dateKey])) {
+        const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
+        schedules[dateKey].forEach(s => {
+          monthSchedules.push({
+            ...s,
+            date: dateKey,
+            displayDate: dateStr
+          });
+        });
+      }
+    }
+    
+    const monthlyPlanDiv = this.shadowRoot.getElementById('monthly-plan');
+    
+    if (planData && planData.summary) {
       this.renderMonthlyPlanData(planData);
+    } else if (monthSchedules.length > 0) {
+      // Show daily schedules if no AI summary yet
+      this.renderMonthlyPlanData({
+        schedules: monthSchedules,
+        summary: `이번 달에 ${monthSchedules.length}개의 일정이 있어요.`
+      });
     } else {
-      const monthlyPlanDiv = this.shadowRoot.getElementById('monthly-plan');
       if (monthlyPlanDiv) {
         monthlyPlanDiv.innerHTML = `
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
-            월간 계획을 생성하려면 "월간 계획 생성" 버튼을 클릭하세요.
+            아직 이번 달 일정이 없어요. 일정을 등록해보세요!
           </div>
         `;
       }
@@ -951,116 +1241,535 @@ class ExtensionUI {
     }
   }
 
-  async loadYearlyData() {
-    // Load yearly plan data
-    const today = this.currentYear || new Date();
-    const yearKey = String(today.getFullYear());
+  async loadQuarterlyData() {
+    // Load quarterly plan data
+    const today = new Date();
+    const currentQuarter = this.currentQuarter || Math.ceil((today.getMonth() + 1) / 3);
+    const currentYear = this.currentQuarterYear || today.getFullYear();
+    const quarterKey = `${currentYear}-Q${currentQuarter}`;
     
-    const yearlyPlans = await chrome.storage.local.get('yearlyPlans') || {};
-    const planData = yearlyPlans.yearlyPlans?.[yearKey];
+    const quarterlyPlans = await chrome.storage.local.get('quarterlyPlans') || {};
+    const planData = quarterlyPlans.quarterlyPlans?.[quarterKey];
     
-    if (planData) {
-      this.renderYearlyPlanData(planData);
+    // Load daily schedules for the quarter
+    const schedules = await this.storage.getSchedules();
+    const quarterSchedules = [];
+    const quarterStartMonth = (currentQuarter - 1) * 3;
+    const quarterEndMonth = quarterStartMonth + 2;
+    const quarterStart = new Date(currentYear, quarterStartMonth, 1);
+    const quarterEnd = new Date(currentYear, quarterEndMonth + 1, 0);
+    
+    // 분기 동안 모든 날짜 순회
+    for (let m = quarterStartMonth; m <= quarterEndMonth; m++) {
+      const daysInMonth = new Date(currentYear, m + 1, 0).getDate();
+      for (let day = 1; day <= daysInMonth; day++) {
+        const d = new Date(currentYear, m, day);
+        const dateKey = this.getLocalDateKey(d);
+        if (schedules[dateKey] && Array.isArray(schedules[dateKey])) {
+          const dateStr = `${d.getMonth() + 1}/${d.getDate()}`;
+          const monthName = d.toLocaleDateString('ko-KR', { month: 'short' });
+          schedules[dateKey].forEach(s => {
+            quarterSchedules.push({
+              ...s,
+              date: dateKey,
+              month: monthName,
+              displayDate: dateStr
+            });
+          });
+        }
+      }
+    }
+    
+    const quarterlyPlanDiv = this.shadowRoot.getElementById('quarterly-plan');
+    
+    if (planData && planData.summary) {
+      this.renderQuarterlyPlanData(planData);
+    } else if (quarterSchedules.length > 0) {
+      // Show daily schedules if no AI summary yet
+      this.renderQuarterlyPlanData({
+        schedules: quarterSchedules,
+        summary: `${currentQuarter}분기에 ${quarterSchedules.length}개의 일정이 있어요.`
+      });
     } else {
-      const yearlyPlanDiv = this.shadowRoot.getElementById('yearly-plan');
-      if (yearlyPlanDiv) {
-        yearlyPlanDiv.innerHTML = `
+      if (quarterlyPlanDiv) {
+        quarterlyPlanDiv.innerHTML = `
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
-            연간 계획을 생성하려면 "연간 계획 생성" 버튼을 클릭하세요.
+            아직 ${currentQuarter}분기 일정이 없어요. 일정을 등록해보세요!
           </div>
         `;
       }
     }
     
-    // Update year display
-    const yearDisplay = this.shadowRoot.getElementById('current-year-display');
-    if (yearDisplay) {
-      const yearStr = today.getFullYear() + '년';
-      yearDisplay.textContent = yearStr;
+    // Update quarter display
+    const quarterDisplay = this.shadowRoot.getElementById('current-quarter-display');
+    if (quarterDisplay) {
+      const quarterStr = `${currentYear}년 ${currentQuarter}분기`;
+      const monthNames = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
+      const dateRange = `${monthNames[quarterStartMonth]} ~ ${monthNames[quarterEndMonth]}`;
+      
+      quarterDisplay.innerHTML = `
+        <div style="font-size: var(--font-size-sm); color: var(--color-text-secondary);">${quarterStr}</div>
+        <div style="font-size: var(--font-size-xs); color: var(--color-text-tertiary); font-style: italic;">${dateRange}</div>
+      `;
     }
   }
 
+  async loadSummaryData() {
+    const summaryContent = this.shadowRoot.getElementById('summary-content');
+    if (!summaryContent) return;
+    
+    summaryContent.innerHTML = `
+      <div style="padding: var(--spacing-xl); text-align: center;">
+        <div class="loading-spinner" style="margin: 0 auto var(--spacing-md);"></div>
+        <div style="color: var(--color-text-secondary);">모든 계획을 불러오는 중...</div>
+      </div>
+    `;
+    
+    try {
+      // Load all schedules
+      const schedules = await this.storage.getSchedules();
+      const weeklyPlans = await chrome.storage.local.get('weeklyPlans') || {};
+      const monthlyPlans = await chrome.storage.local.get('monthlyPlans') || {};
+      const quarterlyPlans = await chrome.storage.local.get('quarterlyPlans') || {};
+      
+      this.renderSummaryContent(schedules, weeklyPlans.weeklyPlans || {}, monthlyPlans.monthlyPlans || {}, quarterlyPlans.quarterlyPlans || {});
+    } catch (error) {
+      console.error('Failed to load summary data:', error);
+      summaryContent.innerHTML = `
+        <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
+          데이터를 불러오는 데 실패했습니다.
+        </div>
+      `;
+    }
+  }
+
+  renderSummaryContent(schedules, weeklyPlans, monthlyPlans, quarterlyPlans) {
+    const summaryContent = this.shadowRoot.getElementById('summary-content');
+    if (!summaryContent) return;
+    
+    const today = new Date();
+    const dateKey = this.getLocalDateKey(today);
+    const todaySchedules = schedules[dateKey] || [];
+    
+    console.log('Summary - dateKey:', dateKey);
+    console.log('Summary - schedules keys:', Object.keys(schedules));
+    console.log('Summary - todaySchedules:', todaySchedules);
+    
+    // Sort schedules by time (handle undefined time)
+    const sortedSchedules = [...todaySchedules].sort((a, b) => {
+      const timeA = (a.time || '00:00').split(':').map(Number);
+      const timeB = (b.time || '00:00').split(':').map(Number);
+      return (timeA[0] * 60 + timeA[1]) - (timeB[0] * 60 + timeB[1]);
+    });
+    
+    // Get current week key
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - today.getDay());
+    const weekKey = `${weekStart.getFullYear()}-W${this.getWeekNumber(weekStart)}`;
+    const currentWeekPlan = weeklyPlans[weekKey];
+    
+    // Get current month key
+    const monthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const currentMonthPlan = monthlyPlans[monthKey];
+    
+    // Get current quarter key
+    const currentQuarter = Math.ceil((today.getMonth() + 1) / 3);
+    const quarterKey = `${today.getFullYear()}-Q${currentQuarter}`;
+    const currentQuarterPlan = quarterlyPlans[quarterKey];
+    
+    // Count completed schedules
+    const completedCount = sortedSchedules.filter(s => s.completed).length;
+    const totalCount = sortedSchedules.length;
+    
+    // Format today's date in Korean
+    const todayStr = today.toLocaleDateString('ko-KR', { month: 'long', day: 'numeric', weekday: 'short' });
+    
+    summaryContent.innerHTML = `
+      <div class="summary-sections">
+        <!-- 일간 일정 섹션 -->
+        <div class="summary-section" style="margin-bottom: var(--spacing-xl);">
+          <h3 style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-accent); margin-bottom: var(--spacing-md);">
+            📅 오늘의 일정 <span style="font-size: var(--font-size-sm); color: var(--color-text-secondary);">(${todayStr})</span>
+            ${totalCount > 0 ? `<span style="font-size: var(--font-size-sm); color: var(--color-success); margin-left: var(--spacing-sm);">${completedCount}/${totalCount} 완료</span>` : ''}
+          </h3>
+          <div style="background: var(--color-bg-elevated); border-radius: var(--radius-md); padding: var(--spacing-md);">
+            ${sortedSchedules.length > 0 
+              ? sortedSchedules.map(s => {
+                  const isCompleted = s.completed || false;
+                  const completedStyle = isCompleted ? 'opacity: 0.6; text-decoration: line-through;' : '';
+                  const checkMark = isCompleted ? '✓' : '○';
+                  const checkColor = isCompleted ? 'var(--color-success)' : 'var(--color-text-tertiary)';
+                  const duration = s.duration || 60;
+                  const endTime = this.calculateEndTime(s.time || '09:00', duration);
+                  return `
+                    <div style="padding: var(--spacing-sm) 0; border-bottom: 1px solid var(--color-border); display: flex; align-items: center; gap: var(--spacing-sm);">
+                      <span style="color: ${checkColor}; font-size: 14px;">${checkMark}</span>
+                      <span style="color: var(--color-text-accent); font-weight: var(--font-weight-medium); min-width: 80px; ${completedStyle}">${s.time || '미정'} - ${endTime}</span>
+                      <span style="${completedStyle}">${s.title}</span>
+                      ${s.priority === 'high' ? '<span style="color: var(--color-error); font-size: var(--font-size-xs); margin-left: auto;">긴급</span>' : ''}
+                    </div>
+                  `;
+                }).join('')
+              : '<div style="color: var(--color-text-tertiary); text-align: center; padding: var(--spacing-md);">아직 오늘 일정이 없어요. 새로운 일정을 추가해보세요!</div>'
+            }
+          </div>
+        </div>
+        
+        <!-- 주간 계획 섹션 -->
+        <div class="summary-section" style="margin-bottom: var(--spacing-xl);">
+          <h3 style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-accent); margin-bottom: var(--spacing-md);">📊 이번 주 계획</h3>
+          <div style="background: var(--color-bg-elevated); border-radius: var(--radius-md); padding: var(--spacing-md);">
+            ${currentWeekPlan && currentWeekPlan.summary 
+              ? `<div style="color: var(--color-text-secondary); line-height: 1.6;">${currentWeekPlan.summary}</div>`
+              : '<div style="color: var(--color-text-tertiary); text-align: center; padding: var(--spacing-md);">아직 주간 계획이 없어요. 일정을 등록하면 자동으로 생성돼요!</div>'
+            }
+          </div>
+        </div>
+        
+        <!-- 월간 계획 섹션 -->
+        <div class="summary-section" style="margin-bottom: var(--spacing-xl);">
+          <h3 style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-accent); margin-bottom: var(--spacing-md);">📈 이번 달 계획</h3>
+          <div style="background: var(--color-bg-elevated); border-radius: var(--radius-md); padding: var(--spacing-md);">
+            ${currentMonthPlan && currentMonthPlan.summary 
+              ? `<div style="color: var(--color-text-secondary); line-height: 1.6;">${currentMonthPlan.summary}</div>`
+              : '<div style="color: var(--color-text-tertiary); text-align: center; padding: var(--spacing-md);">아직 월간 계획이 없어요. 일정을 등록하면 자동으로 생성돼요!</div>'
+            }
+          </div>
+        </div>
+        
+        <!-- 분기 계획 섹션 -->
+        <div class="summary-section" style="margin-bottom: var(--spacing-xl);">
+          <h3 style="font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); color: var(--color-text-accent); margin-bottom: var(--spacing-md);">🎯 ${currentQuarter}분기 계획</h3>
+          <div style="background: var(--color-bg-elevated); border-radius: var(--radius-md); padding: var(--spacing-md);">
+            ${currentQuarterPlan && currentQuarterPlan.summary 
+              ? `<div style="color: var(--color-text-secondary); line-height: 1.6;">${currentQuarterPlan.summary}</div>`
+              : '<div style="color: var(--color-text-tertiary); text-align: center; padding: var(--spacing-md);">아직 분기 계획이 없어요. 일정을 등록하면 자동으로 생성돼요!</div>'
+            }
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  calculateEndTime(startTime, durationMinutes) {
+    const [hours, minutes] = startTime.split(':').map(Number);
+    const totalMinutes = hours * 60 + minutes + durationMinutes;
+    const endHours = Math.floor(totalMinutes / 60) % 24;
+    const endMinutes = totalMinutes % 60;
+    return `${endHours.toString().padStart(2, '0')}:${endMinutes.toString().padStart(2, '0')}`;
+  }
+
+  // ============================================
+  // 채팅 기능 관련 메서드
+  // ============================================
+
+  setupChatEventListeners() {
+    const chatInput = this.shadowRoot.getElementById('chat-input');
+    const chatSendBtn = this.shadowRoot.getElementById('chat-send-btn');
+    const chatMessages = this.shadowRoot.getElementById('chat-messages');
+    
+    if (!chatInput || !chatSendBtn) return;
+
+    // Enter 키로 메시지 전송 (Shift+Enter는 줄바꿈)
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        this.sendChatMessage();
+      }
+    });
+
+    // 전송 버튼 클릭
+    chatSendBtn.addEventListener('click', () => {
+      this.sendChatMessage();
+    });
+
+    // textarea 자동 높이 조절
+    chatInput.addEventListener('input', () => {
+      chatInput.style.height = 'auto';
+      chatInput.style.height = Math.min(chatInput.scrollHeight, 120) + 'px';
+    });
+
+    // 제안 버튼 클릭 이벤트
+    if (chatMessages) {
+      chatMessages.addEventListener('click', (e) => {
+        const suggestionBtn = e.target.closest('.chat-suggestion-btn');
+        if (suggestionBtn) {
+          const suggestion = suggestionBtn.dataset.suggestion;
+          if (suggestion) {
+            chatInput.value = suggestion;
+            this.sendChatMessage();
+          }
+        }
+      });
+    }
+  }
+
+  async sendChatMessage() {
+    const chatInput = this.shadowRoot.getElementById('chat-input');
+    const chatMessagesContainer = this.shadowRoot.getElementById('chat-messages');
+    
+    if (!chatInput || !chatMessagesContainer) return;
+    
+    const message = chatInput.value.trim();
+    if (!message || this.isChatLoading) return;
+
+    // 사용자 메시지 추가
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    
+    this.chatMessages.push({
+      role: 'user',
+      content: message,
+      time: timeStr
+    });
+
+    // 입력창 초기화
+    chatInput.value = '';
+    chatInput.style.height = 'auto';
+
+    // UI 업데이트
+    this.updateChatUI();
+    this.scrollChatToBottom();
+
+    // 로딩 표시
+    this.isChatLoading = true;
+    this.showChatLoadingIndicator();
+
+    try {
+      // 채팅 컨텍스트 수집
+      const scheduleContext = await this.collectScheduleContext();
+      const settings = await this.storage.getSettings();
+      
+      const userInfo = {
+        name: settings.name || '',
+        job: settings.job || '',
+        personality: settings.personality || ''
+      };
+
+      // Gemini API 호출
+      if (!this.gemini) {
+        throw new Error('Gemini API가 설정되지 않았어요. 설정에서 API 키를 입력해주세요.');
+      }
+
+      const response = await this.gemini.chat({
+        message,
+        userInfo,
+        scheduleContext,
+        clientLocalTime: new Date().toISOString(),
+        chatHistory: this.chatMessages.slice(0, -1) // 현재 메시지 제외
+      });
+
+      // AI 응답 추가
+      const responseTime = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+      this.chatMessages.push({
+        role: 'assistant',
+        content: response,
+        time: responseTime
+      });
+
+    } catch (error) {
+      console.error('Chat error:', error);
+      
+      // 에러 메시지 추가
+      const errorTime = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+      this.chatMessages.push({
+        role: 'assistant',
+        content: `죄송해요, 응답을 생성하는 중에 문제가 발생했어요. 😢\n\n${error.message || '잠시 후 다시 시도해 주세요.'}`,
+        time: errorTime
+      });
+    } finally {
+      this.isChatLoading = false;
+      this.hideChatLoadingIndicator();
+      this.updateChatUI();
+      this.scrollChatToBottom();
+    }
+  }
+
+  async collectScheduleContext() {
+    const today = new Date();
+    const dateKey = this.getLocalDateKey(today);
+    
+    // 일간 일정
+    const schedules = await this.storage.getSchedules();
+    const dailySchedules = schedules[dateKey] || [];
+
+    // 주간 계획
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - today.getDay());
+    const weekKey = `${weekStart.getFullYear()}-W${this.getWeekNumber(weekStart)}`;
+    const weeklyPlansResult = await chrome.storage.local.get('weeklyPlans');
+    const weeklyPlan = (weeklyPlansResult.weeklyPlans || {})[weekKey] || null;
+
+    // 월간 계획
+    const monthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const monthlyPlansResult = await chrome.storage.local.get('monthlyPlans');
+    const monthlyPlan = (monthlyPlansResult.monthlyPlans || {})[monthKey] || null;
+
+    // 분기 계획
+    const currentQuarter = Math.ceil((today.getMonth() + 1) / 3);
+    const quarterKey = `${today.getFullYear()}-Q${currentQuarter}`;
+    const quarterlyPlansResult = await chrome.storage.local.get('quarterlyPlans');
+    const quarterlyPlan = (quarterlyPlansResult.quarterlyPlans || {})[quarterKey] || null;
+
+    return {
+      dailySchedules,
+      weeklyPlan,
+      monthlyPlan,
+      quarterlyPlan
+    };
+  }
+
+  updateChatUI() {
+    const chatMessagesContainer = this.shadowRoot.getElementById('chat-messages');
+    if (chatMessagesContainer) {
+      chatMessagesContainer.innerHTML = this.renderChatMessages();
+    }
+  }
+
+  showChatLoadingIndicator() {
+    const chatMessagesContainer = this.shadowRoot.getElementById('chat-messages');
+    if (!chatMessagesContainer) return;
+
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'chat-message chat-message-assistant chat-loading';
+    loadingDiv.innerHTML = `
+      <div class="chat-message-avatar chat-avatar-assistant">🤖</div>
+      <div class="chat-message-content">
+        <div class="chat-typing-indicator">
+          <span class="chat-typing-dot"></span>
+          <span class="chat-typing-dot"></span>
+          <span class="chat-typing-dot"></span>
+        </div>
+      </div>
+    `;
+    chatMessagesContainer.appendChild(loadingDiv);
+    this.scrollChatToBottom();
+  }
+
+  hideChatLoadingIndicator() {
+    const loadingIndicator = this.shadowRoot.querySelector('.chat-loading');
+    if (loadingIndicator) {
+      loadingIndicator.remove();
+    }
+  }
+
+  scrollChatToBottom() {
+    const chatMessagesContainer = this.shadowRoot.getElementById('chat-messages');
+    if (chatMessagesContainer) {
+      setTimeout(() => {
+        chatMessagesContainer.scrollTop = chatMessagesContainer.scrollHeight;
+      }, 50);
+    }
+  }
 
   async processAddTask() {
-    const title = this.shadowRoot.getElementById('task-title').value;
-    const description = this.shadowRoot.getElementById('task-description').value;
+    const title = this.shadowRoot.getElementById('task-title').value.trim();
+    const description = this.shadowRoot.getElementById('task-description').value.trim();
     const priority = this.shadowRoot.getElementById('task-priority').value;
-    const duration = parseInt(this.shadowRoot.getElementById('task-duration').value) || 60;
+    const durationHours = parseFloat(this.shadowRoot.getElementById('task-duration').value) || 2;
+    const duration = Math.round(durationHours * 60); // 시간을 분으로 변환
     
     if (!title) {
-      alert('제목을 입력해주세요.');
+      this.showToast('제목을 입력해주세요.', 'warning');
+      return;
+    }
+    
+    if (!description) {
+      this.showToast('설명을 입력해주세요.', 'warning');
+      return;
+    }
+    
+    // duration 유효성 검사
+    if (durationHours < 0.5) {
+      this.showToast('소요 시간은 최소 0.5시간 이상이어야 해요.', 'warning');
+      return;
+    }
+    
+    if (durationHours > 24) {
+      this.showToast('소요 시간이 24시간을 초과할 수 없어요. 여러 일정으로 나눠서 등록해주세요.', 'warning');
       return;
     }
     
     // Get user settings for AI prompt
     const settings = await this.storage.getSettings();
     
-    // Get existing schedules for conflict detection
+    // 현재 일간 뷰에서 선택된 날짜를 고정으로 사용 (날짜 옆 추가 버튼이므로 해당 일자)
+    const targetDate = this.currentDate || new Date();
+    const dateKey = this.getLocalDateKey(targetDate);
+    
+    // Get existing schedules for the target date
     const schedules = await this.storage.getSchedules();
-    const dateKey = (this.currentDate || new Date()).toISOString().split('T')[0];
     const existingSchedules = schedules[dateKey] || [];
+    
+    // 완료되지 않은 일정만 필터링 (시간 배분 시 완료된 일정은 제외)
+    const activeSchedules = existingSchedules.filter(s => !s.completed);
     
     // If Gemini API is available, use it to analyze and schedule
     if (this.gemini) {
+      // Show progress overlay
+      this.showProgressOverlay();
+      
+      // Start progress animation
+      const progressPromise = this.animateProgress();
+      
       try {
-        // Show loading state
-        const submitBtn = this.shadowRoot.getElementById('submit-task-btn');
-        const submitText = this.shadowRoot.getElementById('submit-task-text');
-        const submitSpinner = this.shadowRoot.getElementById('submit-task-spinner');
-        
-        if (submitBtn && submitText && submitSpinner) {
-          submitText.textContent = 'AI 분석 중...';
-          submitSpinner.style.display = 'inline-block';
-          submitBtn.disabled = true;
-        }
-        
-        // Step 1: Analyze schedule intent (scope and schedule type)
-        const intentResponse = await this.gemini.analyzeScheduleIntent({
-          title,
-          description,
-          priority,
-          userInfo: settings
-        });
-        
-        // Step 2: Process schedules based on intent
-        let scheduleDates = [];
-        
-        if (intentResponse.scheduleType === 'array' && intentResponse.scheduleArray) {
-          // Array format: specific dates and times
-          scheduleDates = intentResponse.scheduleArray;
-        } else if (intentResponse.scheduleType === 'repeat' && intentResponse.repeatPattern) {
-          // Repeat pattern: generate dates based on pattern
-          scheduleDates = this.generateRepeatDates(intentResponse.repeatPattern, intentResponse.scope);
-        } else if (intentResponse.dates && intentResponse.dates.length > 0) {
-          // Specific dates
-          scheduleDates = intentResponse.dates.map(date => ({ date, time: null, duration }));
-        } else {
-          // Single date (daily)
-          const dateKey = (this.currentDate || new Date()).toISOString().split('T')[0];
-          scheduleDates = [{ date: dateKey, time: null, duration }];
-        }
-        
-        // Step 3: Analyze task for each schedule
-        const addedCount = await this.processSchedulesFromIntent({
+        // 일간 매니저에게 해당 날짜의 컨텍스트만 전달하여 시간 배분 요청
+        const aiResponse = await this.gemini.analyzeDailyTask({
           title,
           description,
           priority,
           duration,
-          scheduleDates,
-          intentResponse,
-          settings,
-          existingSchedules
+          targetDate: dateKey,
+          userInfo: settings,
+          existingSchedules: activeSchedules.map(s => ({
+            time: s.time,
+            title: s.title,
+            duration: s.duration || 60,
+            priority: s.priority || 'medium',
+            completed: s.completed || false
+          })),
+          clientLocalTime: new Date().toISOString()
         });
         
-        // Hide loading state
-        if (submitBtn && submitText && submitSpinner) {
-          submitText.textContent = 'AI 분석 및 일정 추가';
-          submitSpinner.style.display = 'none';
-          submitBtn.disabled = false;
+        // AI 응답에서 분할이 필요한 경우 처리
+        if (aiResponse.splitRequired && aiResponse.scheduleArray && aiResponse.scheduleArray.length > 0) {
+          // 분할된 일정들을 해당 날짜에 등록
+          for (const splitSchedule of aiResponse.scheduleArray) {
+            await this.addTaskToScheduleForDate({
+              title: splitSchedule.title || aiResponse.suggestedTitle || title,
+              originalTitle: title,
+              description,
+              priority,
+              duration: splitSchedule.duration || 240,
+              time: splitSchedule.time,
+              aiAnalysis: {
+                ...aiResponse,
+                isSplitSchedule: true
+              }
+            }, dateKey);
+          }
+        } else {
+          // 단일 일정 등록
+          await this.addTaskToScheduleForDate({
+            title: aiResponse.suggestedTitle || title,
+            originalTitle: title,
+            description,
+            priority,
+            duration,
+            time: aiResponse.suggestedTime || '09:00',
+            aiAnalysis: aiResponse
+          }, dateKey);
         }
         
-        // Show success toast (simple format)
-        this.showToast(`${title} 등록 성공`, 'success');
+        // Wait for progress animation to complete, then show completion
+        await progressPromise;
+        await this.showProgressComplete();
+        
+        // Hide progress overlay
+        this.hideProgressOverlay();
+        
+        // Show success toast
+        this.showSuccessToast(title);
         
         // Close modal
         this.shadowRoot.getElementById('add-task-modal').classList.remove('active');
@@ -1071,26 +1780,18 @@ class ExtensionUI {
           addTaskForm.reset();
         }
         this.selectedText = null;
-        const textPreview = this.shadowRoot.getElementById('selected-text-preview');
-        if (textPreview) {
-          textPreview.textContent = '텍스트가 선택되지 않았습니다.';
-        }
+        
+        // Reload daily data to show new schedule
+        await this.loadData();
         
       } catch (error) {
         console.error('AI 분석 실패:', error);
         
-        // Hide loading state
-        const submitBtn = this.shadowRoot.getElementById('submit-task-btn');
-        const submitText = this.shadowRoot.getElementById('submit-task-text');
-        const submitSpinner = this.shadowRoot.getElementById('submit-task-spinner');
+        // Stop progress and show error
+        this.stopProgressAnimation = true;
+        this.hideProgressOverlay();
         
-        if (submitBtn && submitText && submitSpinner) {
-          submitText.textContent = 'AI 분석 및 일정 추가';
-          submitSpinner.style.display = 'none';
-          submitBtn.disabled = false;
-        }
-        
-        this.showToast('AI 분석 중 오류가 발생했습니다. 일정은 추가되었습니다.', 'warning');
+        this.showToast('AI 분석 중 오류 발생', 'warning');
         
         // Add task without AI analysis
         await this.addTaskToSchedule({
@@ -1107,6 +1808,9 @@ class ExtensionUI {
           form.reset();
         }
         this.selectedText = null;
+        
+        // Reload daily data
+        await this.loadData();
       }
     } else {
       // Add task without AI analysis
@@ -1117,7 +1821,7 @@ class ExtensionUI {
         duration
       });
       
-      this.showToast('일정이 추가되었습니다.', 'success');
+      this.showSuccessToast(title);
       
       // Close modal and reset form
       this.shadowRoot.getElementById('add-task-modal').classList.remove('active');
@@ -1126,7 +1830,115 @@ class ExtensionUI {
         form.reset();
       }
       this.selectedText = null;
+      
+      // Reload daily data
+      await this.loadData();
     }
+  }
+
+  showProgressOverlay() {
+    const overlay = this.shadowRoot.getElementById('progress-overlay');
+    if (overlay) {
+      overlay.classList.add('active');
+    }
+    this.stopProgressAnimation = false;
+  }
+
+  hideProgressOverlay() {
+    const overlay = this.shadowRoot.getElementById('progress-overlay');
+    if (overlay) {
+      overlay.classList.remove('active');
+    }
+  }
+
+  async animateProgress() {
+    const messages = this.getProgressMessages();
+    const messageEl = this.shadowRoot.getElementById('progress-message');
+    
+    for (let i = 0; i < messages.length; i++) {
+      if (this.stopProgressAnimation) break;
+      
+      if (messageEl) {
+        // Fade out
+        messageEl.classList.add('fade-out');
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // Change text
+        messageEl.textContent = messages[i];
+        
+        // Fade in
+        messageEl.classList.remove('fade-out');
+        messageEl.classList.add('fade-in');
+        await new Promise(resolve => setTimeout(resolve, 300));
+        messageEl.classList.remove('fade-in');
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 2400)); // 3초 - 0.6초 (애니메이션)
+    }
+    
+    // If still animating after all messages, show waiting message
+    if (!this.stopProgressAnimation && messageEl) {
+      messageEl.classList.add('fade-out');
+      await new Promise(resolve => setTimeout(resolve, 300));
+      messageEl.textContent = "⏳ 마무리하고 있어요...";
+      messageEl.classList.remove('fade-out');
+      messageEl.classList.add('fade-in');
+      await new Promise(resolve => setTimeout(resolve, 300));
+      messageEl.classList.remove('fade-in');
+    }
+  }
+
+  async showProgressComplete() {
+    const messageEl = this.shadowRoot.getElementById('progress-message');
+    
+    if (messageEl) {
+      // Fade out current message
+      messageEl.classList.add('fade-out');
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
+      // Show completion message
+      messageEl.textContent = "✅ 일정이 등록됐어요!";
+      messageEl.classList.remove('fade-out');
+      messageEl.classList.add('fade-in');
+      await new Promise(resolve => setTimeout(resolve, 300));
+      messageEl.classList.remove('fade-in');
+    }
+    
+    // Wait 2 seconds before hiding
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+
+  showSuccessToast(title) {
+    // Remove existing toast if any
+    const existingToast = this.shadowRoot.getElementById('toast-notification');
+    if (existingToast) {
+      existingToast.remove();
+    }
+
+    const toast = document.createElement('div');
+    toast.id = 'toast-notification';
+    toast.className = 'toast toast-success';
+    toast.innerHTML = `
+      <div class="toast-title">${title}</div>
+      <div class="toast-message">계획 등록 성공!</div>
+    `;
+    
+    this.shadowRoot.appendChild(toast);
+    
+    // Trigger animation
+    setTimeout(() => {
+      toast.classList.add('show');
+    }, 10);
+    
+    // Remove after 3 seconds
+    setTimeout(() => {
+      toast.classList.remove('show');
+      setTimeout(() => {
+        if (toast.parentNode) {
+          toast.remove();
+        }
+      }, 300);
+    }, 3000);
   }
 
   showToast(message, type = 'info') {
@@ -1157,6 +1969,36 @@ class ExtensionUI {
         }
       }, 300);
     }, 3000);
+  }
+
+  showConfirmModal(title, message, onConfirm) {
+    const modal = this.shadowRoot.getElementById('confirm-modal');
+    const titleEl = this.shadowRoot.getElementById('confirm-modal-title');
+    const messageEl = this.shadowRoot.getElementById('confirm-modal-message');
+    const cancelBtn = this.shadowRoot.getElementById('confirm-cancel-btn');
+    const okBtn = this.shadowRoot.getElementById('confirm-ok-btn');
+    
+    if (!modal || !titleEl || !messageEl || !cancelBtn || !okBtn) return;
+    
+    titleEl.textContent = title;
+    messageEl.textContent = message;
+    
+    // Remove existing event listeners by cloning
+    const newCancelBtn = cancelBtn.cloneNode(true);
+    const newOkBtn = okBtn.cloneNode(true);
+    cancelBtn.parentNode.replaceChild(newCancelBtn, cancelBtn);
+    okBtn.parentNode.replaceChild(newOkBtn, okBtn);
+    
+    newCancelBtn.addEventListener('click', () => {
+      modal.classList.remove('active');
+    });
+    
+    newOkBtn.addEventListener('click', () => {
+      modal.classList.remove('active');
+      if (onConfirm) onConfirm();
+    });
+    
+    modal.classList.add('active');
   }
 
   checkAndResolveConflicts(aiResponse, existingSchedules, duration) {
@@ -1237,7 +2079,7 @@ class ExtensionUI {
       
       for (let day = startDay; day <= endDay; day++) {
         const date = new Date(year, month - 1, day);
-        dates.push(date.toISOString().split('T')[0]);
+        dates.push(this.getLocalDateKey(date));
       }
       return dates;
     }
@@ -1252,10 +2094,10 @@ class ExtensionUI {
       for (let month = startMonth; month <= endMonth; month++) {
         const daysInMonth = new Date(year, month, 0).getDate();
         // Add first day of each month as placeholder
-        dates.push(new Date(year, month - 1, 1).toISOString().split('T')[0]);
+        dates.push(this.getLocalDateKey(new Date(year, month - 1, 1)));
         // Optionally add last day too
         if (month === endMonth) {
-          dates.push(new Date(year, month - 1, daysInMonth).toISOString().split('T')[0]);
+          dates.push(this.getLocalDateKey(new Date(year, month - 1, daysInMonth)));
         }
       }
       return dates;
@@ -1268,14 +2110,14 @@ class ExtensionUI {
       const day = parseInt(singleDate[2]);
       const year = new Date().getFullYear();
       const date = new Date(year, month - 1, day);
-      return [date.toISOString().split('T')[0]];
+      return [this.getLocalDateKey(date)];
     }
     
     return null;
   }
 
   async addTaskToSchedule(task) {
-    const dateKey = (this.currentDate || new Date()).toISOString().split('T')[0];
+    const dateKey = this.getLocalDateKey(this.currentDate || new Date());
     return this.addTaskToScheduleForDate(task, dateKey);
   }
 
@@ -1312,7 +2154,7 @@ class ExtensionUI {
     
     while (currentDate <= endDate) {
       dates.push({
-        date: currentDate.toISOString().split('T')[0],
+        date: this.getLocalDateKey(currentDate),
         time: null,
         duration: null
       });
@@ -1333,7 +2175,8 @@ class ExtensionUI {
     let addedCount = 0;
     
     for (const scheduleDate of scheduleDates) {
-      const dateKey = scheduleDate.date;
+      // 방어 코드: date가 없으면 오늘 날짜 사용
+      const dateKey = scheduleDate.date || this.getLocalDateKey(new Date());
       const schedules = await this.storage.getSchedules();
       const daySchedules = schedules[dateKey] || [];
       
@@ -1350,43 +2193,95 @@ class ExtensionUI {
           title: s.title,
           duration: s.duration || 60,
           priority: s.priority || 'medium'
-        }))
+        })),
+        clientLocalTime: new Date().toISOString()
       });
       
-      // Check for conflicts
-      const conflictResult = this.checkAndResolveConflicts(aiResponse, daySchedules, scheduleDate.duration || duration);
-      
-      // Use time from scheduleArray if available, otherwise use AI suggestion
-      const finalTime = scheduleDate.time || conflictResult.finalTime || aiResponse.suggestedTime || '09:00';
-      
-      await this.addTaskToScheduleForDate({
-        title,
-        description,
-        priority,
-        duration: scheduleDate.duration || duration,
-        dateKey,
-        aiAnalysis: {
-          ...aiResponse,
-          suggestedTime: finalTime,
-          conflictResolved: conflictResult.resolved
+      // AI가 분할을 권장하고 scheduleArray가 있는 경우
+      if (aiResponse.splitRequired && aiResponse.scheduleArray && aiResponse.scheduleArray.length > 0) {
+        // 분할된 일정들을 각각 등록
+        for (const splitSchedule of aiResponse.scheduleArray) {
+          const splitDateKey = splitSchedule.date || dateKey;
+          const splitSchedules = await this.storage.getSchedules();
+          const splitDaySchedules = splitSchedules[splitDateKey] || [];
+          
+          // 분할된 일정에 대해 충돌 확인
+          const splitConflictResult = this.checkAndResolveConflicts(
+            { suggestedTime: splitSchedule.time },
+            splitDaySchedules,
+            splitSchedule.duration || 240
+          );
+          
+          const splitFinalTime = splitSchedule.time || splitConflictResult.finalTime || '09:00';
+          
+          await this.addTaskToScheduleForDate({
+            title: splitSchedule.title || `${aiResponse.suggestedTitle || title}`,
+            originalTitle: title,
+            description,
+            priority,
+            duration: splitSchedule.duration || 240,
+            aiAnalysis: {
+              ...aiResponse,
+              suggestedTime: splitFinalTime,
+              conflictResolved: splitConflictResult.resolved,
+              isSplitSchedule: true
+            }
+          }, splitDateKey);
+          
+          addedCount++;
         }
-      });
-      
-      addedCount++;
+      } else {
+        // 일반 일정 등록 (분할 불필요)
+        // Check for conflicts
+        const conflictResult = this.checkAndResolveConflicts(aiResponse, daySchedules, scheduleDate.duration || duration);
+        
+        // Use time from scheduleArray if available, otherwise use AI suggestion
+        const finalTime = scheduleDate.time || conflictResult.finalTime || aiResponse.suggestedTime || '09:00';
+        
+        // Use AI suggested title if available (more concise)
+        const finalTitle = aiResponse.suggestedTitle || title;
+        
+        await this.addTaskToScheduleForDate({
+          title: finalTitle,
+          originalTitle: title,
+          description,
+          priority,
+          duration: scheduleDate.duration || duration,
+          aiAnalysis: {
+            ...aiResponse,
+            suggestedTime: finalTime,
+            conflictResolved: conflictResult.resolved
+          }
+        }, dateKey);
+        
+        addedCount++;
+      }
     }
     
     return addedCount;
   }
 
   async addTaskToScheduleForDate(task, dateKey) {
+    // 방어 코드: dateKey가 없거나 undefined인 경우 오늘 날짜 사용
+    if (!dateKey || dateKey === 'undefined') {
+      dateKey = this.getLocalDateKey(new Date());
+      console.warn('dateKey was undefined, using today:', dateKey);
+    }
+    
     const schedules = await this.storage.getSchedules();
+    
+    // 기존 undefined 키 정리
+    if (schedules['undefined']) {
+      delete schedules['undefined'];
+      await this.storage.saveSchedules(schedules);
+    }
     
     if (!schedules[dateKey]) {
       schedules[dateKey] = [];
     }
     
-    // Generate a time slot (you can improve this with AI suggestions)
-    const timeSlot = this.suggestTimeSlot(task, schedules[dateKey]);
+    // task에 time이 있으면 사용, 없으면 자동 배정
+    const timeSlot = task.time || (task.aiAnalysis?.suggestedTime) || this.suggestTimeSlot(task, schedules[dateKey]);
     
     const newSchedule = {
       id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9),
@@ -1408,7 +2303,7 @@ class ExtensionUI {
       }
     }
     
-    if (dateKey === (this.currentDate || new Date()).toISOString().split('T')[0]) {
+    if (dateKey === this.getLocalDateKey(this.currentDate || new Date())) {
       await this.loadData();
     }
   }
@@ -1417,25 +2312,32 @@ class ExtensionUI {
     if (!this.gemini) return;
     
     try {
-      // Get current week, month, year using local timezone
+      // Get current week, month, quarter using local timezone
       const today = new Date(this.currentDate);
       const weekStart = new Date(today);
       weekStart.setDate(today.getDate() - today.getDay());
+      weekStart.setHours(0, 0, 0, 0);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      weekEnd.setHours(23, 59, 59, 999);
       const weekKey = `${weekStart.getFullYear()}-W${this.getWeekNumber(weekStart)}`;
       
       const monthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
-      const yearKey = String(today.getFullYear());
+      const currentQuarter = Math.ceil((today.getMonth() + 1) / 3);
+      const quarterKey = `${today.getFullYear()}-Q${currentQuarter}`;
       
-      // Use AI to sync to weekly/monthly/yearly plans with JSON response
+      // Use AI to sync to weekly/monthly/quarterly plans with JSON response
       const syncResponse = await this.gemini.syncScheduleToPlans(newSchedule, allSchedules, userInfo, {
         weekKey,
         monthKey,
-        yearKey
+        quarterKey,
+        weekStart: this.getLocalDateKey(weekStart),
+        weekEnd: this.getLocalDateKey(weekEnd)
       });
       
       // Parse and store the JSON response
       if (syncResponse) {
-        await this.storePlanData(syncResponse, weekKey, monthKey, yearKey);
+        await this.storePlanData(syncResponse, weekKey, monthKey, quarterKey);
       }
     } catch (error) {
       console.error('Failed to sync schedule to plans:', error);
@@ -1450,7 +2352,15 @@ class ExtensionUI {
     return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
   }
 
-  async storePlanData(planData, weekKey, monthKey, yearKey) {
+  // 로컬 시간대 기준 날짜 키 생성 (YYYY-MM-DD)
+  getLocalDateKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  async storePlanData(planData, weekKey, monthKey, quarterKey) {
     // Store weekly plan
     if (planData.weekly) {
       const weeklyPlans = await chrome.storage.local.get('weeklyPlans') || {};
@@ -1471,14 +2381,14 @@ class ExtensionUI {
       await chrome.storage.local.set(monthlyPlans);
     }
     
-    // Store yearly plan
-    if (planData.yearly) {
-      const yearlyPlans = await chrome.storage.local.get('yearlyPlans') || {};
-      if (!yearlyPlans.yearlyPlans) {
-        yearlyPlans.yearlyPlans = {};
+    // Store quarterly plan
+    if (planData.quarterly) {
+      const quarterlyPlans = await chrome.storage.local.get('quarterlyPlans') || {};
+      if (!quarterlyPlans.quarterlyPlans) {
+        quarterlyPlans.quarterlyPlans = {};
       }
-      yearlyPlans.yearlyPlans[yearKey] = planData.yearly;
-      await chrome.storage.local.set(yearlyPlans);
+      quarterlyPlans.quarterlyPlans[quarterKey] = planData.quarterly;
+      await chrome.storage.local.set(quarterlyPlans);
     }
   }
 
@@ -1541,7 +2451,7 @@ class ExtensionUI {
     }
     
     // Use currentDate instead of today for navigation
-    const dateKey = this.currentDate.toISOString().split('T')[0];
+    const dateKey = this.getLocalDateKey(this.currentDate);
     const schedules = await this.storage.getSchedules();
     const todaySchedules = schedules[dateKey] || [];
     
@@ -1572,15 +2482,19 @@ class ExtensionUI {
           // Format time to show hours and minutes
           const [hours, minutes] = schedule.time.split(':').map(Number);
           const timeStr = minutes > 0 ? `${hours}:${minutes.toString().padStart(2, '0')}` : `${hours}:00`;
+          const isCompleted = schedule.completed || false;
+          const completedClass = isCompleted ? 'schedule-item-completed' : '';
           
           return `
-          <div class="schedule-item" draggable="true" data-id="${scheduleId}" data-schedule='${JSON.stringify(schedule).replace(/'/g, "&#39;")}'>
+          <div class="schedule-item ${completedClass}" draggable="${!isCompleted}" data-id="${scheduleId}" data-schedule='${JSON.stringify(schedule).replace(/'/g, "&#39;")}'>
             <div class="schedule-item-time">${timeStr}</div>
             <div class="schedule-item-content" style="cursor: pointer;">
               <strong class="schedule-item-title">${schedule.title}</strong>
             </div>
-            <div class="schedule-item-actions">
-              <button class="btn btn-icon schedule-delete-btn" data-id="${scheduleId}" type="button">✕</button>
+            <div class="schedule-item-actions" style="opacity: 1;">
+              <button class="btn btn-icon schedule-complete-btn ${isCompleted ? 'completed' : ''}" data-id="${scheduleId}" type="button" title="${isCompleted ? '완료됨' : '완료하기'}">
+                ${isCompleted ? '✓' : '○'}
+              </button>
             </div>
           </div>
         `;
@@ -1609,6 +2523,26 @@ class ExtensionUI {
     
   }
 
+  async toggleScheduleComplete(id) {
+    console.log('toggleScheduleComplete called with id:', id);
+    
+    const schedules = await this.storage.getSchedules();
+    const dateKey = this.getLocalDateKey(this.currentDate);
+    
+    if (schedules[dateKey]) {
+      const schedule = schedules[dateKey].find(s => s.id === id || s.id === String(id));
+      if (schedule) {
+        schedule.completed = !schedule.completed;
+        await this.storage.saveSchedules(schedules);
+        await this.loadData();
+        
+        if (schedule.completed) {
+          this.showToast('일정을 완료했습니다.', 'success');
+        }
+      }
+    }
+  }
+
   async deleteSchedule(id) {
     console.log('deleteSchedule called with id:', id);
     
@@ -1616,7 +2550,7 @@ class ExtensionUI {
     this.showScheduleLoading(true);
     
     const schedules = await this.storage.getSchedules();
-    const dateKey = this.currentDate.toISOString().split('T')[0];
+    const dateKey = this.getLocalDateKey(this.currentDate);
     
     if (schedules[dateKey]) {
       schedules[dateKey] = schedules[dateKey].filter(s => {
@@ -1626,13 +2560,13 @@ class ExtensionUI {
       
       await this.storage.saveSchedules(schedules);
       
-      // If AI is available, review the updated schedule
-      if (this.gemini && schedules[dateKey].length > 0) {
+      // Regenerate plans based on updated schedules
+      if (this.gemini) {
         try {
           const settings = await this.storage.getSettings();
-          await this.gemini.reviewScheduleChanges(schedules[dateKey], settings, 'delete');
+          await this.regeneratePlans(schedules, settings);
         } catch (error) {
-          console.error('AI review failed:', error);
+          console.error('Plan regeneration failed:', error);
         }
       }
       
@@ -1642,6 +2576,48 @@ class ExtensionUI {
     } else {
       this.showScheduleLoading(false);
       console.warn('No schedules found for date');
+    }
+  }
+
+  async regeneratePlans(schedules, settings) {
+    // Get current week, month, quarter keys
+    const today = new Date(this.currentDate);
+    const weekStart = new Date(today);
+    weekStart.setDate(today.getDate() - today.getDay());
+    weekStart.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(weekStart);
+    weekEnd.setDate(weekStart.getDate() + 6);
+    weekEnd.setHours(23, 59, 59, 999);
+    const weekKey = `${weekStart.getFullYear()}-W${this.getWeekNumber(weekStart)}`;
+    
+    const monthKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`;
+    const currentQuarter = Math.ceil((today.getMonth() + 1) / 3);
+    const quarterKey = `${today.getFullYear()}-Q${currentQuarter}`;
+    
+    // Generate plans based on all schedules using syncScheduleToPlans
+    try {
+      // Create a dummy schedule to trigger plan regeneration
+      const dummySchedule = {
+        title: '계획 재생성',
+        time: '00:00',
+        duration: 0,
+        priority: 'medium',
+        date: this.getLocalDateKey(today)
+      };
+      
+      const syncResponse = await this.gemini.syncScheduleToPlans(dummySchedule, schedules, settings, {
+        weekKey,
+        monthKey,
+        quarterKey,
+        weekStart: this.getLocalDateKey(weekStart),
+        weekEnd: this.getLocalDateKey(weekEnd)
+      });
+      
+      if (syncResponse) {
+        await this.storePlanData(syncResponse, weekKey, monthKey, quarterKey);
+      }
+    } catch (error) {
+      console.error('Failed to regenerate plans:', error);
     }
   }
 
@@ -1727,7 +2703,7 @@ class ExtensionUI {
     }
   }
 
-  async generateYearlyPlan() {
+  async generateQuarterlyPlan() {
     if (!this.gemini) {
       this.showToast('Gemini API 키를 설정해주세요.', 'warning');
       return;
@@ -1735,44 +2711,58 @@ class ExtensionUI {
 
     const schedules = await this.storage.getSchedules();
     const settings = await this.storage.getSettings();
-    const yearKey = String(new Date().getFullYear());
+    const today = new Date();
+    const currentQuarter = this.currentQuarter || Math.ceil((today.getMonth() + 1) / 3);
+    const currentYear = this.currentQuarterYear || today.getFullYear();
+    const quarterKey = `${currentYear}-Q${currentQuarter}`;
     
-    const yearlyPlanDiv = this.shadowRoot.getElementById('yearly-plan');
-    if (yearlyPlanDiv) {
-      yearlyPlanDiv.innerHTML = `
+    const quarterlyPlanDiv = this.shadowRoot.getElementById('quarterly-plan');
+    if (quarterlyPlanDiv) {
+      quarterlyPlanDiv.innerHTML = `
         <div style="padding: var(--spacing-xl); text-align: center;">
           <div class="loading-spinner" style="margin: 0 auto var(--spacing-md);"></div>
-          <div style="color: var(--color-text-secondary);">연간 계획을 생성 중입니다...</div>
+          <div style="color: var(--color-text-secondary);">분기 계획을 생성 중입니다...</div>
         </div>
       `;
     }
     
     try {
-      const planData = await this.gemini.generateYearlyPlan(schedules, settings, yearKey);
-      if (planData && yearlyPlanDiv) {
-        await this.storePlanData({ yearly: planData }, null, null, yearKey);
-        this.renderYearlyPlanData(planData);
+      const planData = await this.gemini.generateQuarterlyPlan(schedules, settings, quarterKey, currentQuarter, currentYear);
+      if (planData && quarterlyPlanDiv) {
+        await this.storeQuarterlyPlanData(planData, quarterKey);
+        this.renderQuarterlyPlanData(planData);
       }
     } catch (error) {
-      console.error('연간 계획 생성 실패:', error);
-      this.showToast('연간 계획 생성 중 오류가 발생했습니다.', 'error');
-      if (yearlyPlanDiv) {
-        yearlyPlanDiv.innerHTML = `
+      console.error('분기 계획 생성 실패:', error);
+      this.showToast('분기 계획 생성 중 오류가 발생했습니다.', 'error');
+      if (quarterlyPlanDiv) {
+        quarterlyPlanDiv.innerHTML = `
           <div style="padding: var(--spacing-xl); text-align: center; color: var(--color-text-secondary);">
-            계획 정리에 실패했습니다. 다시 시도해주세요.
+            계획 생성에 실패했습니다. 다시 시도해주세요.
           </div>
         `;
       }
     }
   }
 
+  async storeQuarterlyPlanData(planData, quarterKey) {
+    const quarterlyPlans = await chrome.storage.local.get('quarterlyPlans') || {};
+    if (!quarterlyPlans.quarterlyPlans) {
+      quarterlyPlans.quarterlyPlans = {};
+    }
+    quarterlyPlans.quarterlyPlans[quarterKey] = planData;
+    await chrome.storage.local.set(quarterlyPlans);
+  }
+
   renderWeeklyPlanData(planData) {
     const weeklyPlanDiv = this.shadowRoot.getElementById('weekly-plan');
-    if (!weeklyPlanDiv || !planData.schedules) return;
+    if (!weeklyPlanDiv) return;
     
-    // Group schedules by day to avoid duplicates
+    const schedules = planData.schedules || [];
+    
+    // Group schedules by day
     const schedulesByDay = {};
-    planData.schedules.forEach(schedule => {
+    schedules.forEach(schedule => {
       const day = schedule.day || '미지정';
       if (!schedulesByDay[day]) {
         schedulesByDay[day] = [];
@@ -1780,78 +2770,89 @@ class ExtensionUI {
       schedulesByDay[day].push(schedule);
     });
     
-    const scheduleHtml = Object.entries(schedulesByDay).map(([day, schedules]) => {
-      const daySchedules = schedules.map(schedule => `
-        <div class="schedule-item" style="margin-bottom: var(--spacing-sm); margin-left: var(--spacing-md);">
-          <div class="schedule-item-content">
-            <strong>${schedule.title}</strong>
-            <div style="font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-top: var(--spacing-xs);">
-              ${schedule.time || ''} ${schedule.time && schedule.duration ? `(${schedule.duration}분)` : schedule.duration ? `(${schedule.duration}분)` : ''} ${schedule.category ? `| ${schedule.category}` : ''}
-            </div>
-            ${schedule.notes ? `<div style="font-size: var(--font-size-xs); color: var(--color-text-tertiary); margin-top: var(--spacing-xs);">${schedule.notes}</div>` : ''}
-          </div>
+    const scheduleHtml = Object.entries(schedulesByDay).map(([day, items]) => {
+      const itemsHtml = items.map(schedule => {
+        // task와 title 둘 다 지원 (AI 응답 호환)
+        const displayTitle = schedule.title || schedule.task || '(제목 없음)';
+        const rawDuration = typeof schedule.duration === 'number' ? schedule.duration : parseInt(schedule.duration) || null;
+        const displayDuration = rawDuration ? (rawDuration / 60).toFixed(1) : null;
+        return `
+        <div style="padding: var(--spacing-xs) 0; margin-left: var(--spacing-md);">
+          <span style="color: var(--color-text-accent);">${schedule.time || ''}</span>
+          <span style="margin-left: var(--spacing-sm);">${displayTitle}</span>
+          ${displayDuration ? `<span style="color: var(--color-text-tertiary); font-size: var(--font-size-xs);"> (${displayDuration}시간)</span>` : ''}
         </div>
-      `).join('');
+      `;
+      }).join('');
       
       return `
-        <div style="margin-bottom: var(--spacing-md);">
-          <div style="font-weight: var(--font-weight-semibold); color: var(--color-text-accent); margin-bottom: var(--spacing-xs);">${day}</div>
-          ${daySchedules}
+        <div style="margin-bottom: var(--spacing-sm); padding: var(--spacing-sm) 0; border-bottom: 1px solid var(--color-border);">
+          <div style="font-weight: var(--font-weight-medium); color: var(--color-text-secondary); margin-bottom: var(--spacing-xs);">${day}</div>
+          ${itemsHtml}
         </div>
       `;
     }).join('');
     
     weeklyPlanDiv.innerHTML = `
-      <div class="card" style="margin-top: var(--spacing-lg);">
-        <div class="card-content">
-          ${planData.summary ? `<div style="margin-bottom: var(--spacing-lg); padding: var(--spacing-md); background: var(--color-bg-elevated); border-radius: var(--radius-md);">${planData.summary}</div>` : ''}
-          ${planData.evaluation ? `<div style="margin-bottom: var(--spacing-md); padding: var(--spacing-md); background: var(--color-bg-elevated); border-radius: var(--radius-md);">
-            <strong>평가:</strong> 업무량: ${planData.evaluation.workload || 'N/A'}, 균형: ${planData.evaluation.balance || 'N/A'}, 효율성: ${planData.evaluation.efficiency || 'N/A'}
-          </div>` : ''}
-          <div class="schedule-list">
-            ${scheduleHtml}
-          </div>
-        </div>
-      </div>
+      ${planData.summary ? `<div style="margin-bottom: var(--spacing-lg); padding: var(--spacing-md); background: var(--color-bg-elevated); border-radius: var(--radius-md); line-height: 1.6;">${planData.summary}</div>` : ''}
+      ${schedules.length > 0 ? `<div class="schedule-list">${scheduleHtml}</div>` : ''}
     `;
   }
 
   renderMonthlyPlanData(planData) {
     const monthlyPlanDiv = this.shadowRoot.getElementById('monthly-plan');
-    if (!monthlyPlanDiv || !planData.schedules) return;
+    if (!monthlyPlanDiv) return;
     
-    const scheduleHtml = planData.schedules.map(schedule => `
-      <div class="schedule-item" style="margin-bottom: var(--spacing-sm);">
-        <div class="schedule-item-time">${schedule.date}</div>
-        <div class="schedule-item-content">
-          <strong>${schedule.title}</strong>
-          <div style="font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-top: var(--spacing-xs);">
-            ${schedule.time} (${schedule.duration}분) | ${schedule.category || ''}
-          </div>
-          ${schedule.notes ? `<div style="font-size: var(--font-size-xs); color: var(--color-text-tertiary); margin-top: var(--spacing-xs);">${schedule.notes}</div>` : ''}
+    const schedules = planData.schedules || [];
+    
+    // Group schedules by date
+    const schedulesByDate = {};
+    schedules.forEach(schedule => {
+      const dateKey = schedule.displayDate || schedule.date || '미지정';
+      if (!schedulesByDate[dateKey]) {
+        schedulesByDate[dateKey] = [];
+      }
+      schedulesByDate[dateKey].push(schedule);
+    });
+    
+    const scheduleHtml = Object.entries(schedulesByDate).map(([date, items]) => {
+      const itemsHtml = items.map(schedule => {
+        // task와 title 둘 다 지원 (AI 응답 호환)
+        const displayTitle = schedule.title || schedule.task || '(제목 없음)';
+        const rawDuration = typeof schedule.duration === 'number' ? schedule.duration : parseInt(schedule.duration) || null;
+        const displayDuration = rawDuration ? (rawDuration / 60).toFixed(1) : null;
+        return `
+        <div style="padding: var(--spacing-xs) 0; margin-left: var(--spacing-md);">
+          <span style="color: var(--color-text-accent);">${schedule.time || ''}</span>
+          <span style="margin-left: var(--spacing-sm);">${displayTitle}</span>
+          ${displayDuration ? `<span style="color: var(--color-text-tertiary); font-size: var(--font-size-xs);"> (${displayDuration}시간)</span>` : ''}
         </div>
-      </div>
-    `).join('');
+      `;
+      }).join('');
+      
+      return `
+        <div style="margin-bottom: var(--spacing-sm); padding: var(--spacing-sm) 0; border-bottom: 1px solid var(--color-border);">
+          <div style="font-weight: var(--font-weight-medium); color: var(--color-text-secondary); margin-bottom: var(--spacing-xs);">${date}</div>
+          ${itemsHtml}
+        </div>
+      `;
+    }).join('');
     
     monthlyPlanDiv.innerHTML = `
-      <div class="card" style="margin-top: var(--spacing-lg);">
-        <div class="card-content">
-          ${planData.summary ? `<div style="margin-bottom: var(--spacing-lg); padding: var(--spacing-md); background: var(--color-bg-elevated); border-radius: var(--radius-md);">${planData.summary}</div>` : ''}
-          <div class="schedule-list">
-            ${scheduleHtml}
-          </div>
-        </div>
-      </div>
+      ${planData.summary ? `<div style="margin-bottom: var(--spacing-lg); padding: var(--spacing-md); background: var(--color-bg-elevated); border-radius: var(--radius-md); line-height: 1.6;">${planData.summary}</div>` : ''}
+      ${schedules.length > 0 ? `<div class="schedule-list">${scheduleHtml}</div>` : ''}
     `;
   }
 
-  renderYearlyPlanData(planData) {
-    const yearlyPlanDiv = this.shadowRoot.getElementById('yearly-plan');
-    if (!yearlyPlanDiv || !planData.schedules) return;
+  renderQuarterlyPlanData(planData) {
+    const quarterlyPlanDiv = this.shadowRoot.getElementById('quarterly-plan');
+    if (!quarterlyPlanDiv) return;
     
-    // Group schedules by month to avoid duplicates
+    const schedules = planData.schedules || [];
+    
+    // Group schedules by month
     const schedulesByMonth = {};
-    planData.schedules.forEach(schedule => {
+    schedules.forEach(schedule => {
       const month = schedule.month || '미지정';
       if (!schedulesByMonth[month]) {
         schedulesByMonth[month] = [];
@@ -1859,47 +2860,34 @@ class ExtensionUI {
       schedulesByMonth[month].push(schedule);
     });
     
-    const scheduleHtml = Object.entries(schedulesByMonth).sort((a, b) => {
-      const monthA = parseInt(a[0]) || 0;
-      const monthB = parseInt(b[0]) || 0;
-      return monthA - monthB;
-    }).map(([month, schedules]) => {
-      const monthStr = month !== '미지정' ? `${month}월` : month;
-      const monthSchedules = schedules.map(schedule => {
-        const dateStr = schedule.date ? `${schedule.date}일` : '';
+    const scheduleHtml = Object.entries(schedulesByMonth).map(([month, items]) => {
+      const itemsHtml = items.map(schedule => {
+        const dateStr = schedule.displayDate || schedule.date || '';
+        // task와 title 둘 다 지원 (AI 응답 호환)
+        const displayTitle = schedule.title || schedule.task || '(제목 없음)';
+        const rawDuration = typeof schedule.duration === 'number' ? schedule.duration : parseInt(schedule.duration) || null;
+        const displayDuration = rawDuration ? (rawDuration / 60).toFixed(1) : null;
         return `
-        <div class="schedule-item" style="margin-bottom: var(--spacing-sm); margin-left: var(--spacing-md);">
-          <div class="schedule-item-content">
-            <strong>${schedule.title}</strong>
-            <div style="font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-top: var(--spacing-xs);">
-              ${dateStr} ${schedule.time || ''} ${schedule.time && schedule.duration ? `(${schedule.duration}분)` : schedule.duration ? `(${schedule.duration}분)` : ''} ${schedule.category ? `| ${schedule.category}` : ''}
-            </div>
-            ${schedule.notes ? `<div style="font-size: var(--font-size-xs); color: var(--color-text-tertiary); margin-top: var(--spacing-xs);">${schedule.notes}</div>` : ''}
-          </div>
+        <div style="padding: var(--spacing-xs) 0; margin-left: var(--spacing-md);">
+          <span style="color: var(--color-text-tertiary); min-width: 40px; display: inline-block;">${dateStr}</span>
+          <span style="color: var(--color-text-accent);">${schedule.time || ''}</span>
+          <span style="margin-left: var(--spacing-sm);">${displayTitle}</span>
+          ${displayDuration ? `<span style="color: var(--color-text-tertiary); font-size: var(--font-size-xs);"> (${displayDuration}시간)</span>` : ''}
         </div>
       `;
       }).join('');
       
       return `
-        <div style="margin-bottom: var(--spacing-md);">
-          <div style="font-weight: var(--font-weight-semibold); color: var(--color-text-accent); margin-bottom: var(--spacing-xs);">${monthStr}</div>
-          ${monthSchedules}
+        <div style="margin-bottom: var(--spacing-md); padding: var(--spacing-sm) 0; border-bottom: 1px solid var(--color-border);">
+          <div style="font-weight: var(--font-weight-semibold); color: var(--color-text-accent); margin-bottom: var(--spacing-xs);">${month}</div>
+          ${itemsHtml}
         </div>
       `;
     }).join('');
     
-    yearlyPlanDiv.innerHTML = `
-      <div class="card" style="margin-top: var(--spacing-lg);">
-        <div class="card-content">
-          ${planData.summary ? `<div style="margin-bottom: var(--spacing-lg); padding: var(--spacing-md); background: var(--color-bg-elevated); border-radius: var(--radius-md);">${planData.summary}</div>` : ''}
-          ${planData.evaluation ? `<div style="margin-bottom: var(--spacing-md); padding: var(--spacing-md); background: var(--color-bg-elevated); border-radius: var(--radius-md);">
-            <strong>평가:</strong> 업무량: ${planData.evaluation.workload || 'N/A'}, 균형: ${planData.evaluation.balance || 'N/A'}, 효율성: ${planData.evaluation.efficiency || 'N/A'}, 진행도: ${planData.evaluation.progress || 'N/A'}, 성장: ${planData.evaluation.growth || 'N/A'}
-          </div>` : ''}
-          <div class="schedule-list">
-            ${scheduleHtml}
-          </div>
-        </div>
-      </div>
+    quarterlyPlanDiv.innerHTML = `
+      ${planData.summary ? `<div style="margin-bottom: var(--spacing-lg); padding: var(--spacing-md); background: var(--color-bg-elevated); border-radius: var(--radius-md); line-height: 1.6;">${planData.summary}</div>` : ''}
+      ${schedules.length > 0 ? `<div class="schedule-list">${scheduleHtml}</div>` : ''}
     `;
   }
 
@@ -1912,7 +2900,7 @@ class ExtensionUI {
     
     const items = Array.from(scheduleList.querySelectorAll('.schedule-item'));
     const schedules = await this.storage.getSchedules();
-    const dateKey = this.currentDate.toISOString().split('T')[0];
+    const dateKey = this.getLocalDateKey(this.currentDate);
     
     if (!schedules[dateKey]) {
       schedules[dateKey] = [];
@@ -1998,11 +2986,13 @@ class ExtensionUI {
     
     if (!modal || !titleEl || !contentEl) return;
     
+    this.currentEditingSchedule = schedule;
     titleEl.textContent = schedule.title;
     
     const [hours, minutes] = schedule.time.split(':').map(Number);
     const timeStr = minutes > 0 ? `${hours}:${minutes.toString().padStart(2, '0')}` : `${hours}:00`;
     const duration = schedule.duration || 60;
+    const durationHours = (duration / 60).toFixed(1);
     const endTime = new Date(0, 0, 0, hours, minutes + duration);
     const endTimeStr = `${endTime.getHours()}:${endTime.getMinutes().toString().padStart(2, '0')}`;
     
@@ -2010,7 +3000,7 @@ class ExtensionUI {
       <div class="input-group">
         <label class="input-label">시간</label>
         <div class="card" style="padding: var(--spacing-md);">
-          ${timeStr} - ${endTimeStr} (${duration}분)
+          ${timeStr} - ${endTimeStr} (${durationHours}시간)
         </div>
       </div>
       
@@ -2069,9 +3059,154 @@ class ExtensionUI {
           </div>
         </div>
       ` : ''}
+      
+      <div style="display: flex; gap: var(--spacing-md); margin-top: var(--spacing-lg);">
+        <button class="btn" id="edit-schedule-btn" style="flex: 1;">수정</button>
+        <button class="btn" id="delete-schedule-btn" style="flex: 1; color: var(--color-error);">삭제</button>
+      </div>
     `;
     
+    // Add event listeners for edit and delete buttons
+    const editBtn = contentEl.querySelector('#edit-schedule-btn');
+    const deleteBtn = contentEl.querySelector('#delete-schedule-btn');
+    
+    if (editBtn) {
+      editBtn.addEventListener('click', () => {
+        this.showEditScheduleForm(schedule);
+      });
+    }
+    
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', () => {
+        this.showConfirmModal(
+          '일정 삭제',
+          '이 일정을 삭제하시겠습니까?',
+          () => {
+            modal.classList.remove('active');
+            this.deleteSchedule(schedule.id);
+          }
+        );
+      });
+    }
+    
     modal.classList.add('active');
+  }
+
+  showEditScheduleForm(schedule) {
+    const contentEl = this.shadowRoot.getElementById('schedule-detail-content');
+    const titleEl = this.shadowRoot.getElementById('schedule-detail-title');
+    
+    if (!contentEl || !titleEl) return;
+    
+    titleEl.textContent = '일정 수정';
+    
+    const [hours, minutes] = schedule.time.split(':').map(Number);
+    const timeValue = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+    
+    contentEl.innerHTML = `
+      <form id="edit-schedule-form">
+        <div class="input-group">
+          <label class="input-label">제목</label>
+          <input type="text" class="input" id="edit-title" value="${schedule.title}" required>
+        </div>
+        
+        <div class="input-group">
+          <label class="input-label">설명</label>
+          <textarea class="input input-textarea" id="edit-description" style="min-height: 80px;">${schedule.description || ''}</textarea>
+        </div>
+        
+        <div style="display: flex; gap: var(--spacing-md);">
+          <div class="input-group" style="flex: 1;">
+            <label class="input-label">시간</label>
+            <input type="time" class="input" id="edit-time" value="${timeValue}">
+          </div>
+          <div class="input-group" style="flex: 1;">
+            <label class="input-label">소요시간 (시간)</label>
+            <input type="number" class="input" id="edit-duration" value="${((schedule.duration || 60) / 60).toFixed(1)}" min="0.5" step="0.5">
+          </div>
+        </div>
+        
+        <div class="input-group">
+          <label class="input-label">우선순위</label>
+          <select class="input" id="edit-priority">
+            <option value="low" ${schedule.priority === 'low' ? 'selected' : ''}>낮음</option>
+            <option value="medium" ${schedule.priority === 'medium' || !schedule.priority ? 'selected' : ''}>보통</option>
+            <option value="high" ${schedule.priority === 'high' ? 'selected' : ''}>높음</option>
+          </select>
+        </div>
+        
+        <div style="display: flex; gap: var(--spacing-md); margin-top: var(--spacing-lg);">
+          <button type="button" class="btn" id="cancel-edit-btn" style="flex: 1;">취소</button>
+          <button type="submit" class="btn btn-primary" style="flex: 1;">저장</button>
+        </div>
+      </form>
+    `;
+    
+    // Add event listeners
+    const form = contentEl.querySelector('#edit-schedule-form');
+    const cancelBtn = contentEl.querySelector('#cancel-edit-btn');
+    
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', () => {
+        this.showScheduleDetail(schedule);
+      });
+    }
+    
+    if (form) {
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        await this.saveScheduleEdit(schedule.id);
+      });
+    }
+  }
+
+  async saveScheduleEdit(scheduleId) {
+    const title = this.shadowRoot.getElementById('edit-title').value;
+    const description = this.shadowRoot.getElementById('edit-description').value;
+    const time = this.shadowRoot.getElementById('edit-time').value;
+    const durationHours = parseFloat(this.shadowRoot.getElementById('edit-duration').value) || 1;
+    const duration = Math.round(durationHours * 60); // 시간을 분으로 변환
+    const priority = this.shadowRoot.getElementById('edit-priority').value;
+    
+    if (!title) {
+      this.showToast('제목을 입력해주세요.', 'warning');
+      return;
+    }
+    
+    const schedules = await this.storage.getSchedules();
+    const dateKey = this.getLocalDateKey(this.currentDate);
+    
+    if (schedules[dateKey]) {
+      const schedule = schedules[dateKey].find(s => s.id === scheduleId || s.id === String(scheduleId));
+      if (schedule) {
+        schedule.title = title;
+        schedule.description = description;
+        schedule.time = time;
+        schedule.duration = duration;
+        schedule.priority = priority;
+        
+        await this.storage.saveSchedules(schedules);
+        
+        // Regenerate plans
+        if (this.gemini) {
+          try {
+            const settings = await this.storage.getSettings();
+            await this.regeneratePlans(schedules, settings);
+          } catch (error) {
+            console.error('Plan regeneration failed:', error);
+          }
+        }
+        
+        // Close modal and reload data
+        const modal = this.shadowRoot.getElementById('schedule-detail-modal');
+        if (modal) {
+          modal.classList.remove('active');
+        }
+        
+        await this.loadData();
+        this.showToast('일정이 수정되었습니다.', 'success');
+      }
+    }
   }
 }
 

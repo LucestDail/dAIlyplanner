@@ -15,7 +15,7 @@ export class GeminiAPI {
       throw new Error('Gemini API key is not set');
     }
 
-    const { title, description, priority, duration, selectedText, userInfo, existingSchedules } = taskData;
+    const { title, description, priority, duration, selectedText, userInfo, existingSchedules, clientLocalTime } = taskData;
 
     // Build context-aware prompt with existing schedules
     const prompt = this.buildTaskAnalysisPrompt({
@@ -25,7 +25,8 @@ export class GeminiAPI {
       duration,
       selectedText,
       userInfo,
-      existingSchedules
+      existingSchedules,
+      clientLocalTime
     });
 
     try {
@@ -57,6 +58,136 @@ export class GeminiAPI {
       console.error('Gemini API Error:', error);
       throw error;
     }
+  }
+
+  // 일간 일정 분석 - 특정 날짜에 고정하여 시간 배분
+  async analyzeDailyTask({ title, description, priority, duration, targetDate, userInfo, existingSchedules, clientLocalTime }) {
+    if (!this.apiKey) {
+      throw new Error('Gemini API key is not set');
+    }
+
+    const prompt = this.buildDailyTaskPrompt({
+      title,
+      description,
+      priority,
+      duration,
+      targetDate,
+      userInfo,
+      existingSchedules,
+      clientLocalTime
+    });
+
+    try {
+      const response = await fetch(`${this.baseUrl}?key=${this.apiKey}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }]
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error?.message || 'API request failed');
+      }
+
+      const data = await response.json();
+      const text = data.candidates[0]?.content?.parts[0]?.text || '';
+      return this.parseAIResponse(text);
+    } catch (error) {
+      console.error('Gemini API Error:', error);
+      throw error;
+    }
+  }
+
+  buildDailyTaskPrompt({ title, description, priority, duration, targetDate, userInfo, existingSchedules, clientLocalTime }) {
+    // 클라이언트 로컬 시간
+    const now = clientLocalTime ? new Date(clientLocalTime) : new Date();
+    const currentTimeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    
+    // 대상 날짜가 오늘인지 확인
+    const today = this.getLocalDateKey(now);
+    const isToday = targetDate === today;
+    
+    // 시간을 시간 단위로 변환
+    const durationHours = (duration / 60).toFixed(1);
+    
+    // 기존 일정 포맷팅 (완료된 일정은 이미 필터링됨)
+    const scheduleContext = existingSchedules && existingSchedules.length > 0
+      ? `\n**${targetDate} 기존 일정 (완료되지 않은 일정만, 시간 충돌 피해야 함):**
+${existingSchedules.map(s => `- ${s.time}: ${s.title} (${((s.duration || 60) / 60).toFixed(1)}시간, 우선순위: ${s.priority || 'medium'})`).join('\n')}`
+      : `\n**${targetDate} 기존 일정:** 없음 (자유롭게 시간을 배정할 수 있어요)`;
+
+    const tossStyleGuide = `
+**토스 스타일 라이팅 원칙:**
+- 해요체 사용: '~해요', '~있어요', '~드릴게요'
+- 간결하고 친근하게
+`;
+
+    return `당신은 ${userInfo.name || '사용자'}님의 일간 일정 매니저예요. **${targetDate}** 하루의 일정을 관리해드려요.
+
+${tossStyleGuide}
+
+**현재 시간 정보:**
+- 현재 시간: ${currentTimeStr}
+- 대상 날짜: ${targetDate} ${isToday ? '(오늘)' : ''}
+- 업무 가능 시간: 09:00 ~ 18:00 (8시간)
+
+**사용자 정보:**
+- 이름: ${userInfo.name || '사용자'}님
+- 직업: ${userInfo.job || '미입력'}
+- 성향: ${userInfo.personality || '미입력'}
+
+**새로운 업무:**
+- 제목: ${title}
+- 설명: ${description || '없음'}
+- 우선순위: ${priority}
+- 예상 소요 시간: ${durationHours}시간 (${duration}분)
+${scheduleContext}
+
+**중요 업무 규칙:**
+1. **날짜 고정**: 이 업무는 반드시 ${targetDate}에 배정해요
+2. 하루 최대 업무 시간은 8시간이에요
+3. 동일 업무는 하루 최대 4시간까지만 배정해요
+4. 4시간(240분) 초과 업무는 여러 시간대로 분할해요
+5. 기존 일정과 시간이 겹치지 않게 배정해요
+${isToday ? `6. 현재 시간(${currentTimeStr}) 이후의 시간대만 추천해요` : ''}
+
+**JSON 응답 형식:**
+{
+  "suggestedTitle": "간결한 제목 (10자 이내)",
+  "suggestedTime": "HH:MM (시작 시간)",
+  "timeSlot": "오전/오후",
+  "estimatedDuration": ${duration},
+  "durationHours": ${durationHours},
+  "priority": "${priority || 'medium'}",
+  "splitRequired": true/false,
+  "scheduleArray": [
+    {"time": "HH:MM", "duration": 분단위숫자, "title": "업무명 (1/N)"}
+  ],
+  "recommendations": "시간 배분 안내 (토스체)",
+  "conflictWarning": "충돌 경고 (없으면 null)",
+  "reasoning": "이 시간대를 추천하는 이유"
+}
+
+**splitRequired 규칙:**
+- 소요시간이 4시간(240분) 이하: splitRequired: false
+- 소요시간이 4시간(240분) 초과: splitRequired: true, scheduleArray에 4시간 단위로 분할
+
+응답은 JSON 형식만 제공해주세요.`;
+  }
+
+  getLocalDateKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 
   async analyzeScheduleIntent({ title, description, priority, userInfo }) {
@@ -97,20 +228,21 @@ export class GeminiAPI {
 
   buildScheduleIntentPrompt({ title, description, priority, userInfo }) {
     const age = this.calculateAge(userInfo.birthdate);
+    const today = new Date().toISOString().split('T')[0];
     
-    return `당신은 개인 비서입니다. 사용자의 업무 의도를 파악하고 계획 범위를 판단하는 것이 당신의 역할입니다.
+    return `당신은 ${userInfo.name || '사용자'}님의 비서예요. 업무 의도를 파악하고 일정 범위를 정해드려요.
 
-**페르소나: 개인 비서 (Personal Assistant)**
-- 역할: 사용자의 업무 의도 파악, 계획 범위 판단, 일정 분류 및 구조화
-- 책임: 제목과 설명을 분석하여 일간/주간/월간/연간 범위 판단, 일정 등록 방향 결정
-- 전문성: 자연어 이해, 의도 파악, 일정 분류, 효율적 구조화
-- 의사결정 스타일: 신속한 판단, 명확한 분류, 실용적 접근
+**역할: 개인 비서**
+- 제목과 설명을 분석해서 일간/주간/월간/분기 범위를 판단해요
+- 적절한 일정 등록 방식을 결정해드려요
 
 **사용자 정보:**
-- 이름: ${userInfo.name || '미입력'}
+- 이름: ${userInfo.name || '사용자'}님
 - 나이: ${age || '미입력'}세
 - 직업: ${userInfo.job || '미입력'}
 - 성향: ${userInfo.personality || '미입력'}
+
+**오늘 날짜:** ${today}
 
 **업무 정보:**
 - 제목: ${title}
@@ -118,26 +250,26 @@ export class GeminiAPI {
 - 우선순위: ${priority}
 
 **분석 요청:**
-위 정보를 바탕으로 이 업무가 어느 범위에 해당하는지 판단하고, 일정 등록 방식을 결정해주세요.
+이 업무가 어느 범위에 해당하는지 판단하고, 일정 등록 방식을 결정해주세요.
+- 오늘 또는 특정 하루에 해야 할 일 → daily
+- 이번 주 내에 해야 할 일 → weekly
+- 이번 달 내에 해야 할 일 → monthly
+- 분기 단위로 진행할 일 → quarterly
 
 다음 JSON 형식으로 응답해주세요:
 {
-  "scope": "daily/weekly/monthly/yearly",
-  "scopeReason": "범위 판단 근거 (간단히)",
+  "scope": "daily/weekly/monthly/quarterly",
+  "scopeReason": "범위 판단 이유 (토스체로)",
   "scheduleType": "single/repeat/array",
-  "dates": ["YYYY-MM-DD"] 또는 null,
-  "repeatPattern": {
-    "type": "daily/weekly/monthly",
-    "interval": 숫자,
-    "endDate": "YYYY-MM-DD" 또는 null
-  } 또는 null,
+  "dates": ["${today}"],
+  "repeatPattern": null,
   "scheduleArray": [
     {
-      "date": "YYYY-MM-DD",
-      "time": "HH:MM",
-      "duration": 분 단위
+      "date": "${today}",
+      "time": "09:00",
+      "duration": 60
     }
-  ] 또는 null
+  ]
 }
 
 응답은 JSON 형식만 제공하고, 추가 설명은 하지 마세요.`;
@@ -154,7 +286,15 @@ export class GeminiAPI {
     }
   }
 
-  buildTaskAnalysisPrompt({ title, description, priority, duration, selectedText, userInfo, existingSchedules }) {
+  buildTaskAnalysisPrompt({ title, description, priority, duration, selectedText, userInfo, existingSchedules, clientLocalTime }) {
+    // 클라이언트 로컬 시간 (전달되지 않으면 현재 시간 사용)
+    const now = clientLocalTime ? new Date(clientLocalTime) : new Date();
+    const currentTimeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    const currentDateStr = `${now.getFullYear()}-${(now.getMonth() + 1).toString().padStart(2, '0')}-${now.getDate().toString().padStart(2, '0')}`;
+    
+    // 시간을 시간 단위로 변환
+    const durationHours = (duration / 60).toFixed(1);
+    
     // Calculate age from birthdate
     let age = null;
     if (userInfo.birthdate) {
@@ -170,7 +310,7 @@ export class GeminiAPI {
     // Format existing schedules for context
     const scheduleContext = existingSchedules && existingSchedules.length > 0
       ? `\n기존 일정 목록 (충돌을 피하고 최적의 시간을 제안해야 함):
-${existingSchedules.map(s => `- ${s.time}: ${s.title} (${s.duration || 60}분, 우선순위: ${s.priority || 'medium'})`).join('\n')}`
+${existingSchedules.map(s => `- ${s.time}: ${s.title} (${((s.duration || 60) / 60).toFixed(1)}시간, 우선순위: ${s.priority || 'medium'})`).join('\n')}`
       : '\n기존 일정: 없음 (자유롭게 시간을 제안할 수 있습니다)';
 
     const userContext = userInfo.name 
@@ -201,44 +341,76 @@ ${age ? `- 나이: ${age}세` : ''}
 - 사용자의 업무 효율성과 만족도를 최대화할 수 있는 시간 배정을 해야 합니다.`;
     }
 
-    return `당신은 개인 일정 관리 전문가이자 개인 매니저입니다. 당신의 역할은 다음과 같습니다:
+    const tossStyleGuide = `
+**토스 스타일 라이팅 원칙 (반드시 준수):**
+- 해요체 사용: 모든 문장은 '~해요', '~있어요', '~드릴게요', '~보세요'로 끝내세요
+- 간결하게: 한 문장은 가능한 짧고 명확하게
+- 친근하게: 딱딱한 표현 대신 부드럽고 친근한 말투
+- 긍정적으로: 부정적 표현보다 긍정적인 안내
+- 예시: "시간이 충돌합니다" → "이 시간에는 다른 일정이 있어요"
+- 예시: "권장합니다" → "이렇게 해보시면 좋을 것 같아요"
+`;
 
-**페르소나: 개인 매니저 (Personal Manager)**
-- 역할: 일간 일정 관리, 업무 효율성 극대화, 개인 생산성 향상
-- 책임: 일일 업무 계획 수립, 시간 관리, 우선순위 조정, 업무-생활 균형 유지
-- 전문성: 시간 관리, 업무 효율화, 스트레스 관리, 개인 맞춤형 계획 수립
-- 의사결정 스타일: 실용적, 효율 중심, 개인 맞춤, 즉각적 피드백
-- 업무 방식: 세부 지향, 실행 중심, 실시간 조정, 개인화된 솔루션
+    return `당신은 ${userInfo.name || '사용자'}님의 일간 매니저예요. 하루 일정을 친근하고 세심하게 관리해드려요.
 
-**사용자 상태:**
+${tossStyleGuide}
+
+**현재 시간 정보:**
+- 현재 날짜: ${currentDateStr}
+- 현재 시간: ${currentTimeStr}
+- 업무 시간: 09:00 ~ 18:00 (8시간)
+
+**역할: 일간 매니저**
+- 하루 일정을 효율적으로 계획해드려요
+- 시간 충돌을 방지하고 최적의 시간대를 추천해드려요
+- 현재 시간 이후의 시간대만 추천해주세요
+
+**사용자 정보:**
 ${userContext}${jobContext}${personalityContext}
 
-새로운 할 일 정보:
+**새로운 할 일:**
 - 제목: ${title}
 - 설명: ${description || '없음'}
 - 우선순위: ${priority}
-- 예상 소요 시간: ${duration}분
-${selectedText ? `- 선택한 텍스트 (참고용): "${selectedText}"` : ''}${scheduleContext}
+- 예상 소요 시간: ${durationHours}시간 (${duration}분)
+${selectedText ? `- 참고 텍스트: "${selectedText}"` : ''}${scheduleContext}
 
-중요한 고려사항:
-1. 기존 일정과의 충돌을 반드시 피해야 합니다.
-2. 사용자의 직업과 성향을 고려하여 최적의 시간대를 제안해야 합니다.
-3. 나이와 직업 특성에 맞는 에너지 레벨을 고려해야 합니다.
-4. 업무 효율성을 최대화할 수 있는 시간 배정을 해야 합니다.
-5. 만약 충돌이 발생할 가능성이 있다면 경고를 제공해야 합니다.
+**중요 업무 분할 규칙:**
+1. 하루 최대 업무 시간은 8시간이에요
+2. 동일 업무는 하루 최대 4시간까지만 배정해요
+3. 4시간 초과 업무는 여러 날에 나눠서 등록해야 해요
+4. splitRequired가 true면 scheduleArray에 분할된 일정을 포함해주세요
 
-다음 형식으로 JSON 응답을 제공해주세요:
+**중요 지침:**
+1. 기존 일정과 충돌하지 않는 시간을 추천해주세요
+2. 현재 시간(${currentTimeStr}) 이후의 시간대만 추천해주세요
+3. suggestedTitle: 사용자가 입력한 제목을 10자 이내의 간결한 제목으로 정리해주세요
+4. 추천 사항(recommendations)에 시간 가이드를 포함해주세요
+5. 모든 안내는 토스체(해요체)로 친근하게 작성해주세요
+
+다음 JSON 형식으로 응답해주세요:
 {
-  "suggestedTime": "HH:MM 형식의 추천 시간 (기존 일정과 충돌하지 않는 시간)",
+  "suggestedTitle": "간결한 제목 (10자 이내)",
+  "suggestedTime": "HH:MM (시작 시간, 현재 시간 이후)",
   "timeSlot": "오전/오후/저녁",
-  "estimatedDuration": 예상 소요 시간(분),
-  "priority": "low/medium/high",
+  "estimatedDuration": ${duration || 60},
+  "durationHours": ${durationHours},
+  "priority": "${priority || 'medium'}",
   "category": "업무/개인/학습/기타",
-  "recommendations": "일정 배정에 대한 추천 사항 (5문장 이내로 간단명료하게)",
-  "conflictWarning": "기존 일정과의 충돌 가능성 경고 (없으면 null)",
-  "energyLevel": "이 작업에 필요한 에너지 수준 (low/medium/high)",
-  "reasoning": "이 시간대를 추천하는 이유 (5문장 이내로 간단명료하게)"
+  "splitRequired": true/false,
+  "scheduleArray": [
+    {"date": "YYYY-MM-DD", "time": "HH:MM", "duration": 분단위숫자, "title": "분할된 제목 (1/N)"}
+  ],
+  "recommendations": "HH:MM에 시작해서 HH:MM까지 진행하시면 돼요. (토스체로 친근한 추가 안내)",
+  "conflictWarning": "충돌 경고 메시지 (없으면 null, 있으면 토스체로)",
+  "energyLevel": "low/medium/high",
+  "reasoning": "이 시간대를 추천하는 이유 (토스체로 2-3문장)"
 }
+
+**splitRequired와 scheduleArray 규칙:**
+- 요청된 소요시간이 4시간(240분) 이하면: splitRequired: false, scheduleArray는 단일 일정
+- 요청된 소요시간이 4시간(240분) 초과면: splitRequired: true, 4시간 단위로 분할하여 scheduleArray에 포함
+- 분할 시 각 날짜에 동일 업무는 최대 4시간, 하루 총 업무는 8시간 이내로 배정
 
 응답은 JSON 형식만 제공하고, 추가 설명은 하지 마세요.`;
   }
@@ -363,12 +535,12 @@ ${selectedText ? `- 선택한 텍스트 (참고용): "${selectedText}"` : ''}${s
     }
   }
 
-  async generateYearlyPlan(schedules, userInfo, yearKey) {
+  async generateQuarterlyPlan(schedules, userInfo, quarterKey, quarter, year) {
     if (!this.apiKey) {
       throw new Error('Gemini API key is not set');
     }
 
-    const prompt = this.buildYearlyPlanPrompt(schedules, userInfo, yearKey);
+    const prompt = this.buildQuarterlyPlanPrompt(schedules, userInfo, quarterKey, quarter, year);
 
     try {
       const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
@@ -409,59 +581,53 @@ ${selectedText ? `- 선택한 텍스트 (참고용): "${selectedText}"` : ''}${s
     const weekSchedules = [];
     for (let date = new Date(weekStart); date <= weekEnd; date.setDate(date.getDate() + 1)) {
       const dateKey = date.toISOString().split('T')[0];
-      if (schedules[dateKey]) {
-        weekSchedules.push(...schedules[dateKey].map(s => ({ ...s, date: dateKey })));
+      if (schedules[dateKey] && Array.isArray(schedules[dateKey])) {
+        schedules[dateKey].forEach(s => {
+          if (s && s.title) {
+            weekSchedules.push({ ...s, date: dateKey });
+          }
+        });
       }
     }
     
-    return `당신은 주 단위 업무 중간 관리자입니다. 당신의 역할은 다음과 같습니다:
+    const tossStyleGuide = `
+**토스 스타일 라이팅 원칙 (반드시 준수):**
+- 해요체 사용: 모든 문장은 '~해요', '~있어요', '~드릴게요'로 끝내세요
+- 간결하게: 한 문장은 가능한 짧고 명확하게
+- 친근하게: 딱딱한 표현 대신 부드럽고 친근한 말투
+- 긍정적으로: 부정적 표현보다 긍정적인 안내
+`;
+    
+    const schedulesText = weekSchedules.length > 0
+      ? weekSchedules.map(s => `- [${s.date}] ${s.time || '미정'}: ${s.title} (${s.duration || 60}분)`).join('\n')
+      : '(이번 주 등록된 일정이 없어요)';
+    
+    return `당신은 ${userInfo.name || '사용자'}님의 주간 매니저예요. 이번 주 일정을 친근하게 정리해드려요.
 
-**페르소나: 주 단위 업무 중간 관리자 (Weekly Operations Manager)**
-- 역할: 주 단위 업무 계획 수립 및 조율, 일간 일정의 통합 관리 및 최적화
-- 책임: 주간 목표 달성을 위한 일정 배치, 업무 우선순위 조정, 팀원(일간 매니저)의 업무 조율, 주간 생산성 극대화
-- 전문성: 주 단위 프로젝트 관리, 업무 흐름 최적화, 중기 목표 설정, 리소스 배분, 팀 협업 촉진
-- 의사결정 스타일: 데이터 기반 분석, 팀 협업 중시, 효율성 극대화, 실용적 접근, 균형잡힌 판단
-- 업무 방식: 주간 리뷰 및 평가, 일간 일정 통합 분석, 우선순위 재조정, 효율성 개선 제안
-- 커뮤니케이션: 명확한 피드백, 구체적인 개선 방안 제시, 주간 성과 평가
+${tossStyleGuide}
 
-**사용자 상태:**
-- 이름: ${userInfo.name || '미입력'}
+**역할: 주간 매니저**
+- 이번 주 일간 일정들을 통합 분석해요
+- 주간 목표와 핵심 업무를 정리해드려요
+- 효율적인 시간 활용을 도와드려요
+
+**${userInfo.name || '사용자'}님 정보:**
 - 직업: ${userInfo.job || '미입력'}
 - 성향: ${userInfo.personality || '미입력'}
-- 나이: ${this.calculateAge(userInfo.birthdate) || '미입력'}
 
-**현재 주간 키:** ${weekKey}
-**주간 일정 데이터 (일간 일정 통합):**
-${JSON.stringify(weekSchedules, null, 2)}
+**이번 주 일정 (${weekKey}):**
+${schedulesText}
 
-**주간 계획 정리 요청:**
-현재 등록된 일간 일정들을 기반으로 주 단위 관점에서 통합 분석하고 정리해주세요. 단순히 생성하는 것이 아니라, 기존 일정들을 평가하고 최적화 방안을 제시해야 합니다.
+**작성 요청:**
+위 일간 일정을 바탕으로 주간 계획을 토스체로 친근하게 정리해주세요.
+- 일정이 없으면: "이번 주는 아직 등록된 일정이 없어요. 새로운 일정을 추가해보세요!"
+- 일정이 있으면: 핵심 일정 위주로 친근하게 요약해주세요
 
 다음 JSON 형식으로 응답해주세요:
-
 {
   "weekKey": "${weekKey}",
-  "schedules": [
-    {
-      "title": "일정 제목",
-      "day": "월/화/수/목/금/토/일",
-      "time": "HH:MM",
-      "duration": 분 단위,
-      "priority": "low/medium/high",
-      "category": "업무/개인/학습/기타",
-      "notes": "주간 관점에서의 업무 메모 및 조율 사항"
-    }
-  ],
-  "summary": "주간 계획 요약 및 중간 관리자 관점의 인사이트",
-  "evaluation": {
-    "workload": "주간 업무량 평가 (light/moderate/heavy)",
-    "balance": "업무-생활 균형 평가",
-    "efficiency": "시간 활용 효율성 평가"
-  },
-  "goals": ["주간 목표 1", "주간 목표 2"],
-  "challenges": ["예상되는 도전 과제"],
-  "improvements": ["개선 방안 1", "개선 방안 2"],
-  "recommendations": ["주간 관점의 추천 사항"]
+  "schedules": [일간 일정 배열],
+  "summary": "이번 주에는 N개의 일정이 있어요. (토스체로 친근하게 요약)"
 }
 
 응답은 JSON 형식만 제공하고, 추가 설명은 하지 마세요.`;
@@ -476,140 +642,120 @@ ${JSON.stringify(weekSchedules, null, 2)}
     const monthSchedules = [];
     for (let date = new Date(monthStart); date <= monthEnd; date.setDate(date.getDate() + 1)) {
       const dateKey = date.toISOString().split('T')[0];
-      if (schedules[dateKey]) {
-        monthSchedules.push(...schedules[dateKey].map(s => ({ ...s, date: dateKey })));
+      if (schedules[dateKey] && Array.isArray(schedules[dateKey])) {
+        schedules[dateKey].forEach(s => {
+          if (s && s.title) {
+            monthSchedules.push({ ...s, date: dateKey });
+          }
+        });
       }
     }
     
-    return `당신은 월 단위 통합 업무 고위 관리자입니다. 당신의 역할은 다음과 같습니다:
+    const tossStyleGuide = `
+**토스 스타일 라이팅 원칙 (반드시 준수):**
+- 해요체 사용: 모든 문장은 '~해요', '~있어요', '~드릴게요'로 끝내세요
+- 간결하게: 한 문장은 가능한 짧고 명확하게
+- 친근하게: 딱딱한 표현 대신 부드럽고 친근한 말투
+- 긍정적으로: 부정적 표현보다 긍정적인 안내
+`;
+    
+    const monthName = `${month}월`;
+    const schedulesText = monthSchedules.length > 0
+      ? monthSchedules.map(s => `- [${s.date}] ${s.time || '미정'}: ${s.title} (${s.duration || 60}분)`).join('\n')
+      : `(${monthName}에 등록된 일정이 없어요)`;
+    
+    return `당신은 ${userInfo.name || '사용자'}님의 월간 매니저예요. 이번 달 일정을 친근하게 정리해드려요.
 
-**페르소나: 월 단위 통합 업무 고위 관리자 (Monthly Strategic Director)**
-- 역할: 월 단위 전략 수립, 장기 목표 관리, 주간 계획의 통합 및 최적화, 조직 성과 관리
-- 책임: 월간 목표 달성, 리소스 배분, 전략적 의사결정, 팀 성과 관리, 장기 비전과의 연계
-- 전문성: 전략 기획, 리스크 관리, 장기 비전 수립, 조직 운영 최적화, 성과 분석, 리소스 최적화
-- 의사결정 스타일: 전략적 사고, 데이터 분석, 리더십, 비전 제시, 장기 관점, 혁신 추진
-- 업무 방식: 월간 리뷰 및 평가, 전략적 재조정, 리스크 사전 대응, 성과 지표 관리
-- 커뮤니케이션: 전략적 인사이트 제공, 명확한 방향성 제시, 구체적 실행 계획 수립
+${tossStyleGuide}
 
-**사용자 상태:**
-- 이름: ${userInfo.name || '미입력'}
+**역할: 월간 매니저**
+- 이번 달 일간 일정들을 통합 분석해요
+- 월간 목표와 주요 마일스톤을 정리해드려요
+- 한 달의 흐름을 한눈에 볼 수 있게 도와드려요
+
+**${userInfo.name || '사용자'}님 정보:**
 - 직업: ${userInfo.job || '미입력'}
 - 성향: ${userInfo.personality || '미입력'}
-- 나이: ${this.calculateAge(userInfo.birthdate) || '미입력'}
 
-**현재 월간 키:** ${monthKey}
-**월간 일정 데이터 (일간 일정 통합):**
-${JSON.stringify(monthSchedules, null, 2)}
+**이번 달 일정 (${monthName}, ${monthSchedules.length}개):**
+${schedulesText}
 
-**월간 계획 정리 요청:**
-현재 등록된 일간 일정들을 기반으로 월 단위 관점에서 통합 분석하고 정리해주세요. 단순히 생성하는 것이 아니라, 기존 일정들을 평가하고 전략적 최적화 방안을 제시해야 합니다.
+**작성 요청:**
+위 일간 일정을 바탕으로 월간 계획을 토스체로 친근하게 정리해주세요.
+- 일정이 없으면: "이번 달은 아직 등록된 일정이 없어요. 새로운 일정을 추가해보세요!"
+- 일정이 있으면: 핵심 일정 위주로 친근하게 요약해주세요
 
 다음 JSON 형식으로 응답해주세요:
-
 {
   "monthKey": "${monthKey}",
-  "schedules": [
-    {
-      "title": "일정 제목",
-      "date": "YYYY-MM-DD",
-      "time": "HH:MM",
-      "duration": 분 단위,
-      "priority": "low/medium/high",
-      "category": "업무/개인/학습/기타",
-      "notes": "월간 관점에서의 전략적 메모"
-    }
-  ],
-  "summary": "월간 계획 요약 및 고위 관리자 관점의 인사이트",
-  "evaluation": {
-    "workload": "월간 업무량 평가 (light/moderate/heavy)",
-    "balance": "업무-생활 균형 평가",
-    "efficiency": "시간 활용 효율성 평가",
-    "progress": "월간 목표 달성도 평가"
-  },
-  "strategicGoals": ["월간 전략 목표 1", "월간 전략 목표 2"],
-  "keyMilestones": ["주요 마일스톤 1", "주요 마일스톤 2"],
-  "resourceAllocation": "리소스 배분 계획",
-  "riskAssessment": "리스크 평가 및 대응 방안",
-  "improvements": ["전략적 개선 방안 1", "전략적 개선 방안 2"],
-  "recommendations": "월간 관점의 전략적 추천 사항"
+  "schedules": [일간 일정 배열],
+  "summary": "이번 달에는 N개의 일정이 있어요. (토스체로 친근하게 요약)"
 }
 
 응답은 JSON 형식만 제공하고, 추가 설명은 하지 마세요.`;
   }
 
-  buildYearlyPlanPrompt(schedules, userInfo, yearKey) {
-    // Extract all schedules for the year
-    const year = parseInt(yearKey);
-    const yearStart = new Date(year, 0, 1);
-    const yearEnd = new Date(year, 11, 31);
+  buildQuarterlyPlanPrompt(schedules, userInfo, quarterKey, quarter, year) {
+    // Extract all schedules for the quarter
+    const quarterStartMonth = (quarter - 1) * 3;
+    const quarterEndMonth = quarterStartMonth + 2;
+    const quarterStart = new Date(year, quarterStartMonth, 1);
+    const quarterEnd = new Date(year, quarterEndMonth + 1, 0);
     
-    const yearSchedules = [];
-    for (let date = new Date(yearStart); date <= yearEnd; date.setDate(date.getDate() + 1)) {
+    const quarterSchedules = [];
+    for (let date = new Date(quarterStart); date <= quarterEnd; date.setDate(date.getDate() + 1)) {
       const dateKey = date.toISOString().split('T')[0];
-      if (schedules[dateKey]) {
-        yearSchedules.push(...schedules[dateKey].map(s => ({ ...s, date: dateKey })));
+      if (schedules[dateKey] && Array.isArray(schedules[dateKey])) {
+        schedules[dateKey].forEach(s => {
+          if (s && s.title) {
+            quarterSchedules.push({ ...s, date: dateKey });
+          }
+        });
       }
     }
     
-    return `당신은 연 단위 플래너를 구성하는 최고급 관리자입니다. 당신의 역할은 다음과 같습니다:
+    const monthNames = ['1월', '2월', '3월', '4월', '5월', '6월', '7월', '8월', '9월', '10월', '11월', '12월'];
+    const quarterMonths = `${monthNames[quarterStartMonth]} ~ ${monthNames[quarterEndMonth]}`;
+    
+    const tossStyleGuide = `
+**토스 스타일 라이팅 원칙 (반드시 준수):**
+- 해요체 사용: 모든 문장은 '~해요', '~있어요', '~드릴게요'로 끝내세요
+- 간결하게: 한 문장은 가능한 짧고 명확하게
+- 친근하게: 딱딱한 표현 대신 부드럽고 친근한 말투
+- 긍정적으로: 부정적 표현보다 긍정적인 안내
+`;
+    
+    const schedulesText = quarterSchedules.length > 0
+      ? quarterSchedules.map(s => `- [${s.date}] ${s.time || '미정'}: ${s.title} (${s.duration || 60}분)`).join('\n')
+      : `(${quarter}분기에 등록된 일정이 없어요)`;
+    
+    return `당신은 ${userInfo.name || '사용자'}님의 분기 매니저예요. 이번 분기 일정을 친근하게 정리해드려요.
 
-**페르소나: 연 단위 최고급 관리자 (Chief Planning Officer)**
-- 역할: 연간 전략 수립, 장기 비전 관리, 조직 전체의 목표 달성, 장기적 성장 관리
-- 책임: 연간 목표 설정, 전략적 방향성 제시, 리소스 최적 배분, 조직 성장 관리, 혁신 추진
-- 전문성: 장기 전략 기획, 비전 수립, 조직 리더십, 혁신 관리, 성과 평가, 미래 예측, 트렌드 분석
-- 의사결정 스타일: 비전 중심 사고, 전략적 통찰, 리더십, 혁신 추진, 장기 관점, 데이터 기반 판단
-- 업무 방식: 연간 리뷰 및 평가, 전략적 재조정, 장기 비전과의 연계, 분기별 마일스톤 관리
-- 커뮤니케이션: 비전 제시, 전략적 인사이트, 명확한 방향성, 실행 가능한 계획 수립
+${tossStyleGuide}
 
-**사용자 상태:**
-- 이름: ${userInfo.name || '미입력'}
+**역할: 분기 매니저**
+- 이번 분기 일간 일정들을 통합 분석해요
+- 분기 목표와 주요 마일스톤을 정리해드려요
+- 3개월의 흐름을 한눈에 볼 수 있게 도와드려요
+
+**${userInfo.name || '사용자'}님 정보:**
 - 직업: ${userInfo.job || '미입력'}
 - 성향: ${userInfo.personality || '미입력'}
-- 나이: ${this.calculateAge(userInfo.birthdate) || '미입력'}
 
-**현재 연간 키:** ${yearKey}
-**연간 일정 데이터 (일간 일정 통합):**
-${JSON.stringify(yearSchedules, null, 2)}
+**이번 분기 (${year}년 ${quarter}분기, ${quarterMonths}):**
+등록된 일정: ${quarterSchedules.length}개
+${schedulesText}
 
-**연간 계획 정리 요청:**
-현재 등록된 일간 일정들을 기반으로 연 단위 관점에서 통합 분석하고 정리해주세요. 단순히 생성하는 것이 아니라, 기존 일정들을 평가하고 장기적 전략적 최적화 방안을 제시해야 합니다.
+**작성 요청:**
+위 일간 일정을 바탕으로 분기 계획을 토스체로 친근하게 정리해주세요.
+- 일정이 없으면: "이번 분기는 아직 등록된 일정이 없어요. 새로운 일정을 추가해보세요!"
+- 일정이 있으면: 핵심 일정 위주로 친근하게 요약해주세요
 
 다음 JSON 형식으로 응답해주세요:
-
 {
-  "yearKey": "${yearKey}",
-  "schedules": [
-    {
-      "title": "일정 제목",
-      "month": "월",
-      "date": "일",
-      "time": "HH:MM",
-      "duration": 분 단위,
-      "priority": "low/medium/high",
-      "category": "업무/개인/학습/기타",
-      "notes": "연간 관점에서의 전략적 메모"
-    }
-  ],
-  "summary": "연간 계획 요약 및 최고급 관리자 관점의 인사이트",
-  "evaluation": {
-    "workload": "연간 업무량 평가 (light/moderate/heavy)",
-    "balance": "업무-생활 균형 평가",
-    "efficiency": "시간 활용 효율성 평가",
-    "progress": "연간 목표 달성도 평가",
-    "growth": "성장 및 발전 평가"
-  },
-  "vision": "연간 비전 및 목표",
-  "strategicObjectives": ["전략 목표 1", "전략 목표 2", "전략 목표 3"],
-  "keyInitiatives": ["주요 이니셔티브 1", "주요 이니셔티브 2"],
-  "quarterlyBreakdown": {
-    "Q1": "1분기 계획 및 평가",
-    "Q2": "2분기 계획 및 평가",
-    "Q3": "3분기 계획 및 평가",
-    "Q4": "4분기 계획 및 평가"
-  },
-  "successMetrics": ["성공 지표 1", "성공 지표 2"],
-  "improvements": ["장기적 개선 방안 1", "장기적 개선 방안 2"],
-  "recommendations": "연간 관점의 전략적 추천 사항"
+  "quarterKey": "${quarterKey}",
+  "schedules": [일간 일정 배열],
+  "summary": "${quarter}분기에는 N개의 일정이 있어요. (토스체로 친근하게 요약)"
 }
 
 응답은 JSON 형식만 제공하고, 추가 설명은 하지 마세요.`;
@@ -778,73 +924,210 @@ ${scheduleList}
   }
 
   buildScheduleSyncPrompt(newSchedule, allSchedules, userInfo, keys) {
-    return `당신은 개인 일정 관리 전문가입니다. 새로운 일간 일정을 주간, 월간, 연간 계획에 통합해야 합니다.
+    // Collect all schedules for the relevant periods
+    const weeklySchedules = [];
+    const monthlySchedules = [];
+    const quarterlySchedules = [];
+    
+    // Get current date info from the keys
+    const weekYear = parseInt(keys.weekKey.split('-W')[0]);
+    const weekNum = parseInt(keys.weekKey.split('-W')[1]);
+    const monthYear = parseInt(keys.monthKey.split('-')[0]);
+    const monthNum = parseInt(keys.monthKey.split('-')[1]);
+    const quarterYear = parseInt(keys.quarterKey.split('-Q')[0]);
+    const quarterNum = parseInt(keys.quarterKey.split('-Q')[1]);
+    
+    // Get quarter month range
+    const quarterStartMonth = (quarterNum - 1) * 3 + 1;
+    const quarterEndMonth = quarterNum * 3;
+    
+    // Use directly passed weekStart and weekEnd if available, otherwise calculate
+    let weekDates;
+    if (keys.weekStart && keys.weekEnd) {
+      weekDates = {
+        start: new Date(keys.weekStart + 'T00:00:00'),
+        end: new Date(keys.weekEnd + 'T23:59:59')
+      };
+    } else {
+      // Fallback: Calculate week start and end dates
+      const getWeekDates = (year, weekNumber) => {
+        const simple = new Date(year, 0, 1 + (weekNumber - 1) * 7);
+        const dow = simple.getDay();
+        const startDate = new Date(simple);
+        if (dow <= 4) {
+          startDate.setDate(simple.getDate() - simple.getDay());
+        } else {
+          startDate.setDate(simple.getDate() + 7 - simple.getDay());
+        }
+        const endDate = new Date(startDate);
+        endDate.setDate(startDate.getDate() + 6);
+        return { start: startDate, end: endDate };
+      };
+      weekDates = getWeekDates(weekYear, weekNum);
+    }
+    
+    console.log('Building sync prompt with:', {
+      weekKey: keys.weekKey,
+      monthKey: keys.monthKey,
+      quarterKey: keys.quarterKey,
+      weekDates,
+      allSchedulesKeys: Object.keys(allSchedules)
+    });
+    
+    // Collect schedules for each period
+    for (const [dateKey, schedules] of Object.entries(allSchedules)) {
+      // Skip undefined or invalid date keys
+      if (!dateKey || dateKey === 'undefined' || !Array.isArray(schedules)) {
+        continue;
+      }
+      
+      const date = new Date(dateKey + 'T00:00:00');
+      if (isNaN(date.getTime())) continue;
+      
+      const scheduleMonth = date.getMonth() + 1;
+      const scheduleYear = date.getFullYear();
+      
+      // Check if schedule is within the current week
+      if (date >= weekDates.start && date <= weekDates.end) {
+        schedules.forEach(s => {
+          weeklySchedules.push({ ...s, date: dateKey });
+        });
+      }
+      
+      // Check if schedule is within the current month
+      if (scheduleYear === monthYear && scheduleMonth === monthNum) {
+        schedules.forEach(s => {
+          monthlySchedules.push({ ...s, date: dateKey });
+        });
+      }
+      
+      // Check if schedule is within the current quarter
+      if (scheduleYear === quarterYear && 
+          scheduleMonth >= quarterStartMonth && 
+          scheduleMonth <= quarterEndMonth) {
+        schedules.forEach(s => {
+          quarterlySchedules.push({ ...s, date: dateKey });
+        });
+      }
+    }
+    
+    // Include the new schedule if it's valid
+    if (newSchedule.title && newSchedule.title !== '계획 재생성') {
+      const newScheduleDate = newSchedule.date || new Date().toISOString().split('T')[0];
+      const newDate = new Date(newScheduleDate + 'T00:00:00');
+      const newMonth = newDate.getMonth() + 1;
+      const newYear = newDate.getFullYear();
+      
+      const scheduleObj = { ...newSchedule, date: newScheduleDate };
+      
+      if (newDate >= weekDates.start && newDate <= weekDates.end) {
+        weeklySchedules.push(scheduleObj);
+      }
+      if (newYear === monthYear && newMonth === monthNum) {
+        monthlySchedules.push(scheduleObj);
+      }
+      if (newYear === quarterYear && newMonth >= quarterStartMonth && newMonth <= quarterEndMonth) {
+        quarterlySchedules.push(scheduleObj);
+      }
+    }
+    
+    // 중복 제거 함수 (id 또는 date+time+title 기준)
+    const removeDuplicates = (arr) => {
+      const seen = new Set();
+      return arr.filter(s => {
+        const key = s.id || `${s.date}-${s.time}-${s.title}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    };
+    
+    // Sort schedules
+    const sortSchedules = (arr) => arr.sort((a, b) => {
+      if (a.date !== b.date) return a.date.localeCompare(b.date);
+      return (a.time || '00:00').localeCompare(b.time || '00:00');
+    });
+    
+    // 중복 제거 후 정렬
+    const uniqueWeeklySchedules = removeDuplicates(weeklySchedules);
+    const uniqueMonthlySchedules = removeDuplicates(monthlySchedules);
+    const uniqueQuarterlySchedules = removeDuplicates(quarterlySchedules);
+    
+    sortSchedules(uniqueWeeklySchedules);
+    sortSchedules(uniqueMonthlySchedules);
+    sortSchedules(uniqueQuarterlySchedules);
+    
+    // Format schedules for prompt
+    const formatSchedules = (arr) => arr.length > 0 
+      ? arr.map(s => `- [${s.date}] ${s.time || '미정'}: ${s.title} (${s.duration || 60}분, 우선순위: ${s.priority || 'medium'}${s.completed ? ', 완료' : ''})`).join('\n')
+      : '(등록된 일정이 없어요)';
+    
+    console.log('Collected schedules (after dedup):', {
+      weekly: uniqueWeeklySchedules.length,
+      monthly: uniqueMonthlySchedules.length,
+      quarterly: uniqueQuarterlySchedules.length
+    });
+    
+    const tossStyleGuide = `
+**토스 스타일 라이팅 원칙 (반드시 준수):**
+- 해요체 사용: 모든 문장은 '~해요', '~있어요', '~드릴게요'로 끝내세요
+- 간결하게: 한 문장은 가능한 짧고 명확하게
+- 친근하게: 딱딱한 표현 대신 부드럽고 친근한 말투
+- 긍정적으로: 부정적 표현보다 긍정적인 안내
+- 예시: "계획이 없습니다" → "아직 등록된 일정이 없어요"
+- 예시: "확인하십시오" → "확인해보세요"
+`;
+    
+    return `당신은 사용자의 개인 일정 매니저예요. 일간 일정을 바탕으로 주간, 월간, 분기 계획을 친근하게 정리해드려요.
 
-새 일정 정보:
-- 제목: ${newSchedule.title}
-- 시간: ${newSchedule.time}
-- 소요 시간: ${newSchedule.duration || 60}분
-- 우선순위: ${newSchedule.priority || 'medium'}
-- 설명: ${newSchedule.description || '없음'}
+${tossStyleGuide}
 
-사용자 정보:
-- 이름: ${userInfo.name || '미입력'}
+**이번 주(${keys.weekKey}) 일간 일정 (${uniqueWeeklySchedules.length}개):**
+${formatSchedules(uniqueWeeklySchedules)}
+
+**이번 달(${keys.monthKey}) 일간 일정 (${uniqueMonthlySchedules.length}개):**
+${formatSchedules(uniqueMonthlySchedules)}
+
+**이번 분기(${keys.quarterKey}) 일간 일정 (${uniqueQuarterlySchedules.length}개):**
+${formatSchedules(uniqueQuarterlySchedules)}
+
+**사용자 정보:**
+- 이름: ${userInfo.name || '사용자'}님
 - 직업: ${userInfo.job || '미입력'}
 - 성향: ${userInfo.personality || '미입력'}
 
-현재 주간 키: ${keys.weekKey}
-현재 월간 키: ${keys.monthKey}
-현재 연간 키: ${keys.yearKey}
+**작성 요청:**
+위 일간 일정 데이터를 기반으로 각 기간별 계획 요약을 작성해주세요.
+- summary는 토스체로 친근하게 작성해주세요
+- 등록된 일정이 없으면 "아직 등록된 일정이 없어요. 새로운 일정을 추가해보세요!" 형태로 안내해주세요
+- 일정이 있으면 주요 일정을 친근하게 요약해주세요
 
 다음 JSON 형식으로 응답해주세요:
 {
   "weekly": {
     "weekKey": "${keys.weekKey}",
     "schedules": [
-      {
-        "title": "일정 제목",
-        "day": "월/화/수/목/금/토/일",
-        "time": "HH:MM",
-        "duration": 분 단위,
-        "priority": "low/medium/high",
-        "category": "카테고리",
-        "notes": "주간 관점에서의 메모"
-      }
+      { "date": "YYYY-MM-DD", "time": "HH:MM", "title": "일정 제목", "duration": 60, "priority": "medium" }
     ],
-    "summary": "주간 계획 요약"
+    "summary": "이번 주에는 N개의 일정이 있어요. (토스체로 요약)"
   },
   "monthly": {
     "monthKey": "${keys.monthKey}",
     "schedules": [
-      {
-        "title": "일정 제목",
-        "date": "YYYY-MM-DD",
-        "time": "HH:MM",
-        "duration": 분 단위,
-        "priority": "low/medium/high",
-        "category": "카테고리",
-        "notes": "월간 관점에서의 메모"
-      }
+      { "date": "YYYY-MM-DD", "time": "HH:MM", "title": "일정 제목", "duration": 60, "priority": "medium" }
     ],
-    "summary": "월간 계획 요약"
+    "summary": "이번 달에는 N개의 일정이 있어요. (토스체로 요약)"
   },
-  "yearly": {
-    "yearKey": "${keys.yearKey}",
+  "quarterly": {
+    "quarterKey": "${keys.quarterKey}",
     "schedules": [
-      {
-        "title": "일정 제목",
-        "month": "월",
-        "date": "일",
-        "time": "HH:MM",
-        "duration": 분 단위,
-        "priority": "low/medium/high",
-        "category": "카테고리",
-        "notes": "연간 관점에서의 메모"
-      }
+      { "date": "YYYY-MM-DD", "time": "HH:MM", "title": "일정 제목", "duration": 60, "priority": "medium" }
     ],
-    "summary": "연간 계획 요약"
+    "summary": "이번 분기에는 N개의 일정이 있어요. (토스체로 요약)"
   }
 }
+
+**중요: schedules 배열의 각 일정은 반드시 위 형식(date, time, title, duration, priority)을 따라주세요. 일정이 없으면 빈 배열 []을 반환하세요.**
 
 응답은 JSON 형식만 제공하고, 추가 설명은 하지 마세요.`;
   }
@@ -907,6 +1190,188 @@ ${scheduleList}
 ${JSON.stringify(schedules, null, 2)}
 
 변경 사항을 검토하고 필요시 최적화 방안을 제안해주세요.`;
+  }
+
+  // ============================================
+  // 채팅 기능 - 개인 일정 관리 에이전트
+  // ============================================
+
+  async chat({ message, userInfo, scheduleContext, clientLocalTime, chatHistory = [] }) {
+    if (!this.apiKey) {
+      throw new Error('Gemini API key is not set');
+    }
+
+    const prompt = this.buildChatPrompt({
+      message,
+      userInfo,
+      scheduleContext,
+      clientLocalTime,
+      chatHistory
+    });
+
+    try {
+      const response = await fetch(`${this.baseUrl}?key=${this.apiKey}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            parts: [{
+              text: prompt
+            }]
+          }],
+          generationConfig: {
+            temperature: 0.7,
+            topP: 0.9,
+            maxOutputTokens: 2048
+          }
+        })
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error?.message || 'API request failed');
+      }
+
+      const data = await response.json();
+      const text = data.candidates[0]?.content?.parts[0]?.text || '';
+      
+      return text.trim();
+    } catch (error) {
+      console.error('Gemini Chat API Error:', error);
+      throw error;
+    }
+  }
+
+  buildChatPrompt({ message, userInfo, scheduleContext, clientLocalTime, chatHistory }) {
+    const { dailySchedules, weeklyPlan, monthlyPlan, quarterlyPlan } = scheduleContext;
+    
+    // 오늘 날짜와 시간 정보
+    const now = new Date(clientLocalTime);
+    const todayStr = now.toLocaleDateString('ko-KR', { 
+      year: 'numeric', 
+      month: 'long', 
+      day: 'numeric', 
+      weekday: 'long' 
+    });
+    const currentTimeStr = now.toLocaleTimeString('ko-KR', { 
+      hour: '2-digit', 
+      minute: '2-digit' 
+    });
+
+    // 일간 일정 포맷팅
+    const formatDailySchedules = (schedules) => {
+      if (!schedules || schedules.length === 0) {
+        return '(등록된 일정이 없어요)';
+      }
+      return schedules.map(s => {
+        const status = s.completed ? '✅ 완료' : '⏳ 예정';
+        const durationHours = (s.duration / 60).toFixed(1);
+        return `- [${s.time}] ${s.title} (${durationHours}시간, ${status})`;
+      }).join('\n');
+    };
+
+    // 주간 일정 포맷팅
+    const formatWeeklySchedules = (weeklyData) => {
+      if (!weeklyData || !weeklyData.schedules || weeklyData.schedules.length === 0) {
+        return '(등록된 일정이 없어요)';
+      }
+      return weeklyData.schedules.map(s => {
+        const durationHours = ((s.duration || 60) / 60).toFixed(1);
+        return `- [${s.date}] ${s.time || '미정'}: ${s.title} (${durationHours}시간)`;
+      }).join('\n');
+    };
+
+    // 월간 일정 포맷팅
+    const formatMonthlySchedules = (monthlyData) => {
+      if (!monthlyData || !monthlyData.schedules || monthlyData.schedules.length === 0) {
+        return '(등록된 일정이 없어요)';
+      }
+      return monthlyData.schedules.map(s => {
+        const durationHours = ((s.duration || 60) / 60).toFixed(1);
+        return `- [${s.date}] ${s.time || '미정'}: ${s.title} (${durationHours}시간)`;
+      }).join('\n');
+    };
+
+    // 분기 일정 포맷팅
+    const formatQuarterlySchedules = (quarterlyData) => {
+      if (!quarterlyData || !quarterlyData.schedules || quarterlyData.schedules.length === 0) {
+        return '(등록된 일정이 없어요)';
+      }
+      return quarterlyData.schedules.map(s => {
+        const durationHours = ((s.duration || 60) / 60).toFixed(1);
+        return `- [${s.date}] ${s.time || '미정'}: ${s.title} (${durationHours}시간)`;
+      }).join('\n');
+    };
+
+    // 이전 대화 내역 포맷팅
+    const formatChatHistory = (history) => {
+      if (!history || history.length === 0) {
+        return '';
+      }
+      return history.slice(-6).map(msg => {
+        const role = msg.role === 'user' ? '사용자' : '어시스턴트';
+        return `${role}: ${msg.content}`;
+      }).join('\n');
+    };
+
+    const historySection = chatHistory.length > 0 
+      ? `\n## 이전 대화 내역\n${formatChatHistory(chatHistory)}\n` 
+      : '';
+
+    return `당신은 개인 일정 관리를 도와주는 친근한 AI 어시스턴트예요. 사용자의 일정과 계획에 대한 질문에 답변하고, 효율적인 시간 관리를 위한 조언을 제공해요.
+
+## 페르소나 & 말투 스타일
+- 토스(Toss)의 따뜻하고 친근한 말투를 사용해요
+- "~해요", "~이에요", "~네요" 처럼 부드러운 종결어를 사용해요
+- 이모지를 적절히 활용해서 친근감을 더해요 (과하지 않게)
+- 짧고 명확한 문장을 사용하고, 핵심을 먼저 말해요
+- 사용자를 ${userInfo.name || '회원'}님으로 부르며 존중해요
+- 공감과 격려의 표현을 자연스럽게 넣어요
+- 필요할 때는 리스트나 구조화된 형태로 정보를 정리해서 전달해요
+
+## 현재 시간 정보
+- 오늘: ${todayStr}
+- 현재 시간: ${currentTimeStr}
+
+## 사용자 프로필
+- 이름: ${userInfo.name || '(미입력)'}
+- 직업: ${userInfo.job || '(미입력)'}
+- 성향: ${userInfo.personality || '(미입력)'}
+
+## 오늘의 일정 (${this.getLocalDateKey(now)})
+${formatDailySchedules(dailySchedules)}
+
+## 이번 주 일정
+${formatWeeklySchedules(weeklyPlan)}
+
+## 이번 달 일정
+${formatMonthlySchedules(monthlyPlan)}
+
+## 이번 분기 일정
+${formatQuarterlySchedules(quarterlyPlan)}
+${historySection}
+## 응답 가이드라인
+1. 사용자의 일정 데이터를 기반으로 정확한 정보를 제공해요
+2. 일정 관련 질문에는 구체적인 날짜와 시간을 포함해서 답변해요
+3. 일정 추가/수정/삭제는 직접 할 수 없지만, 적절한 조언을 제공할 수 있어요
+4. 업무 효율성, 시간 관리, 우선순위 설정에 대한 조언을 해줄 수 있어요
+5. 사용자의 성향을 고려해서 맞춤형 조언을 제공해요
+6. 너무 길지 않게, 핵심 위주로 답변해요
+
+## 사용자 질문
+${message}
+
+위 정보를 참고해서 사용자의 질문에 친근하고 도움이 되는 답변을 해주세요.`;
+  }
+
+  // 날짜 키 생성 헬퍼 (로컬 타임존 기준)
+  getLocalDateKey(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 }
 
