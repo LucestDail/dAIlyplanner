@@ -6,8 +6,7 @@
   "permissions": [
     "storage",
     "sidePanel",
-    "activeTab",
-    "scripting"
+    "activeTab"
   ],
   "host_permissions": [
     "https://generativelanguage.googleapis.com/*"
